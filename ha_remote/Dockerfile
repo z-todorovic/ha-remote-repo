@@ -1,10 +1,11 @@
 FROM python:3.11-alpine
 RUN pip install --no-cache-dir websockets requests
 
-# Copy all local files into the image
-COPY . /data/
+WORKDIR /data
+COPY . .
 
-# Move the launcher script to root and make it executable
-RUN mv /data/run.sh /run.sh && chmod +x /run.sh
+# Debug: list what was actually copied
+RUN echo "[DEBUG] Listing contents of /data after COPY:" && ls -R /data
 
-CMD ["/run.sh"]
+RUN chmod +x /data/run.sh
+CMD ["/data/run.sh"]
