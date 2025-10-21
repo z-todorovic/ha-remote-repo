@@ -16,5 +16,6 @@
     "server": "str",
     "ha_host": "str",
     "ha_port": "int"
-  }
+  },
+  "arch": ["aarch64", "amd64", "armv7", "i386"]
 }
