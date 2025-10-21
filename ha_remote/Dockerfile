@@ -1,6 +1,10 @@
 FROM python:3.11-alpine
 RUN pip install --no-cache-dir websockets requests
-COPY ha_remote_relay.py /data/ha_remote_relay.py
-COPY run.sh /run.sh
-RUN chmod +x /run.sh
+
+# Copy everything in this folder
+COPY . /data/
+
+# Move run.sh to root
+RUN mv /data/run.sh /run.sh && chmod +x /run.sh
+
 CMD ["/run.sh"]
