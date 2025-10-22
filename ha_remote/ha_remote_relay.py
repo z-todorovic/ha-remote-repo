@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-import os, socket, struct, time, threading
-import asyncio, websockets
+import os, socket, struct, time, threading, websocket
 
 SERVER = os.getenv("HA_REMOTE_SERVER", "wss://cometgps.com/ha-remote/ws/tunnel/test1")
 HA_HOST = os.getenv("HA_REMOTE_HA_HOST", "127.0.0.1")
@@ -23,7 +22,7 @@ def connect_loop():
     while True:
         try:
             print(f"[HA Relay] Connecting to {SERVER} ...")
-            ws = websockets.create_connection(SERVER, timeout=10)
+            ws = websocket.create_connection(SERVER, timeout=10)
             print("[HA Relay] Connected to Tomcat tunnel.")
             while True:
                 hdr = ws.recv_frame().data
