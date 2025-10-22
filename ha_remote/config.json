@@ -8,7 +8,7 @@
   "host_network": true,
   "homeassistant_api": true,
   "options": {
-    "server": "ws://yourdomain/ha-cloud/ws/tunnel/test1",
+    "server": "wss://cometgps.com/ha-remote/ws/tunnel/test1",
     "ha_host": "127.0.0.1",
     "ha_port": 8123
   },
