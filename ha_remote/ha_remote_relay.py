@@ -1,96 +1,109 @@
 #!/usr/bin/env python3
-import asyncio
-import websockets
-import socket
-import json
-import os
-import time
-import traceback
+import os, asyncio, websockets, base64, json, socket, traceback, time
 
-# --------------------------------------------------------------------
-# Configuration
-# --------------------------------------------------------------------
-HA_HOST = os.getenv("HA_REMOTE_HA_HOST", "127.0.0.1")
+SERVER = os.getenv("HA_REMOTE_SERVER", "ws://yourserver/ha-remote/ws/tunnel/test1")
+HA_HOST = os.getenv("HA_REMOTE_HA_HOST", "homeassistant")
 HA_PORT = int(os.getenv("HA_REMOTE_HA_PORT", "8123"))
-SERVER_URL = os.getenv("HA_REMOTE_SERVER", "ws://yourserver/ha-remote/ws/tunnel/test1")
+RETRY = 5
 
-# reconnection interval (seconds)
-RETRY_INTERVAL = 5
-BUFFER = 65536
-
-
-# --------------------------------------------------------------------
-# Helpers
-# --------------------------------------------------------------------
-async def connect_local_ha():
-    """Open a TCP connection to the local Home Assistant."""
-    reader, writer = await asyncio.open_connection(HA_HOST, HA_PORT)
-    return reader, writer
-
-
-async def read_from_ha(reader, websocket):
-    """Continuously read bytes from HA and forward to cloud."""
-    try:
-        while True:
-            data = await reader.read(BUFFER)
-            if not data:
+async def read_http_response_from_sock(sock):
+    """
+    Read HTTP response from connected socket:
+     - read headers until \r\n\r\n
+     - if Content-Length present, read that many bytes
+     - otherwise read until socket closes (fallback)
+    Return (status_int, headers_dict, body_bytes)
+    """
+    sock.settimeout(5)
+    data = b""
+    while b"\r\n\r\n" not in data:
+        chunk = sock.recv(4096)
+        if not chunk:
+            break
+        data += chunk
+    header_part, sep, rest = data.partition(b"\r\n\r\n")
+    header_lines = header_part.decode(errors='replace').split("\r\n")
+    status_line = header_lines[0] if header_lines else "HTTP/1.1 200 OK"
+    status_tok = status_line.split(" ", 2)
+    status = int(status_tok[1]) if len(status_tok) >= 2 and status_tok[1].isdigit() else 200
+    headers = {}
+    cl = None
+    for h in header_lines[1:]:
+        if ":" in h:
+            k, v = h.split(":", 1)
+            headers[k.strip()] = v.strip()
+            if k.lower().strip() == "content-length":
+                try:
+                    cl = int(v.strip())
+                except:
+                    cl = None
+    body = rest
+    if cl is not None:
+        need = cl - len(body)
+        while need > 0:
+            chunk = sock.recv(min(8192, need))
+            if not chunk:
                 break
-            await websocket.send(data)
-    except Exception as e:
-        # Network errors simply close loop
-        pass
+            body += chunk
+            need -= len(chunk)
+    else:
+        # read until close (short timeout)
+        try:
+            while True:
+                chunk = sock.recv(8192)
+                if not chunk:
+                    break
+                body += chunk
+        except socket.timeout:
+            pass
+    return status, headers, body
 
-
-async def read_from_ws(websocket, writer):
-    """Continuously read bytes from WebSocket and send to HA."""
-    try:
-        async for msg in websocket:
-            if isinstance(msg, str):
-                # JSON or text frames - reserved for control later
-                continue
-            writer.write(msg)
-            await writer.drain()
-    except Exception as e:
-        pass
-
-
-async def single_session():
-    """One full relay session (until disconnected)."""
-    try:
-        async with websockets.connect(SERVER_URL, max_size=None) as ws:
-            print(f"[HA Remote] Connected to cloud: {SERVER_URL}")
-
-            reader, writer = await connect_local_ha()
-            print(f"[HA Remote] Connected to local HA at {HA_HOST}:{HA_PORT}")
-
-            # Run both directions concurrently
-            await asyncio.gather(
-                read_from_ha(reader, ws),
-                read_from_ws(ws, writer)
-            )
-
-    except (websockets.exceptions.ConnectionClosedError,
-            ConnectionRefusedError,
-            socket.error) as e:
-        print(f"[HA Remote] Connection lost: {e}")
-    except Exception as e:
-        print(f"[HA Remote] Unexpected error: {type(e).__name__}: {e}")
-        traceback.print_exc()
-    finally:
-        # ensure sockets close
-        await asyncio.sleep(0.1)
-
-
-async def main():
-    print(f"[HA Remote] Starting tunnel -> {SERVER_URL}")
+async def handle_ws():
     while True:
-        await single_session()
-        print(f"[HA Remote] Reconnecting in {RETRY_INTERVAL}s...")
-        await asyncio.sleep(RETRY_INTERVAL)
-
+        try:
+            print(f"[relay] connecting to {SERVER}")
+            async with websockets.connect(SERVER, max_size=None) as ws:
+                print("[relay] connected")
+                async for msg in ws:
+                    # expect text JSON frames
+                    if isinstance(msg, str):
+                        try:
+                            obj = json.loads(msg)
+                            if obj.get("type") == "req" and "body" in obj and "id" in obj:
+                                rid = obj["id"]
+                                b64 = obj["body"]
+                                req_raw = base64.b64decode(b64)
+                                # forward to local HA
+                                try:
+                                    s = socket.create_connection((HA_HOST, HA_PORT), timeout=5)
+                                    s.sendall(req_raw)
+                                    status, headers, body = await asyncio.get_event_loop().run_in_executor(None, lambda: read_http_response_from_sock(s))
+                                    # build response JSON
+                                    res = {
+                                        "id": rid,
+                                        "type": "res",
+                                        "status": status,
+                                        "headers": headers,
+                                        "body": base64.b64encode(body).decode()
+                                    }
+                                    await ws.send(json.dumps(res))
+                                    s.close()
+                                except Exception as e:
+                                    # send an error response
+                                    res = {"id": rid, "type": "res", "status": 502, "headers": {}, "body": base64.b64encode(b"").decode()}
+                                    await ws.send(json.dumps(res))
+                        except Exception as e:
+                            print("bad frame:", e)
+                    else:
+                        # ignore binary frames for now
+                        pass
+        except Exception as e:
+            print("[relay] disconnected:", e)
+            traceback.print_exc()
+            await asyncio.sleep(RETRY)
 
 if __name__ == "__main__":
     try:
-        asyncio.run(main())
+        asyncio.run(handle_ws())
     except KeyboardInterrupt:
-        print("[HA Remote] Exiting.")
+        print("exiting")
