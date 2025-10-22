@@ -1,80 +1,47 @@
 #!/usr/bin/env python3
-import os
-import socket
-import struct
-import time
-import threading
-import websocket
-import ssl
+import os, socket, struct, time, threading
+import asyncio, websockets
 
 SERVER = os.getenv("HA_REMOTE_SERVER", "wss://cometgps.com/ha-remote/ws/tunnel/test1")
 HA_HOST = os.getenv("HA_REMOTE_HA_HOST", "127.0.0.1")
 HA_PORT = int(os.getenv("HA_REMOTE_HA_PORT", "8123"))
 
-TYPE_DATA = 1
-TYPE_END = 2
-
-def send_frame(ws, type_, chan, payload=b""):
-    header = struct.pack("!BII", type_, chan, len(payload))
-    ws.send_binary(header + payload)
-
-def handle_ha_to_tunnel(ws, chan, sock):
+def handle_channel(ws, chan_id, sock):
     try:
         while True:
             data = sock.recv(8192)
             if not data:
                 break
-            send_frame(ws, TYPE_DATA, chan, data)
-    except Exception as e:
-        print(f"[HA Relay] HA->Tunnel error (chan {chan}): {e}")
+            frame = struct.pack("!BIB", 1, chan_id, 0) + struct.pack("!H", len(data)) + data
+            ws.send_binary(frame)
+    except Exception:
+        pass
     finally:
-        try:
-            send_frame(ws, TYPE_END, chan, b"")
-        except Exception:
-            pass
         sock.close()
 
 def connect_loop():
     while True:
         try:
             print(f"[HA Relay] Connecting to {SERVER} ...")
-            ws = websocket.create_connection(
-                SERVER,
-                timeout=0,                # never timeout on recv
-                ping_interval=30,
-                ping_timeout=10,
-                sslopt={"cert_reqs": ssl.CERT_NONE}
-            )
+            ws = websockets.create_connection(SERVER, timeout=10)
             print("[HA Relay] Connected to Tomcat tunnel.")
-
-            # Start keep-alive thread
-            def ping_loop():
-                try:
-                    while True:
-                        time.sleep(30)
-                        send_frame(ws, TYPE_DATA, 0, b"")
-                except Exception as e:
-                    print(f"[HA Relay] Ping loop error: {e}")
-            threading.Thread(target=ping_loop, daemon=True).start()
-
             while True:
-                frame = ws.recv_frame().data
-                if not frame or len(frame) < 9:
+                hdr = ws.recv_frame().data
+                if not hdr or len(hdr) < 8:
                     continue
-                type_, chan, length = struct.unpack("!BII", frame[:9])
-                payload = b""
-                if length > 0:
-                    payload = ws.recv()
-                if type_ == TYPE_DATA:
+                type_, chan, a, b, c = hdr[0], struct.unpack("!I", hdr[1:5])[0], hdr[5], hdr[6], hdr[7]
+                length = (a << 16) | (b << 8) | c
+                data = ws.recv() if length > 0 else b""
+
+                if type_ == 1:  # data
+                    # open per-channel socket to HA
                     s = socket.socket()
                     s.connect((HA_HOST, HA_PORT))
-                    threading.Thread(
-                        target=handle_ha_to_tunnel, args=(ws, chan, s), daemon=True
-                    ).start()
-                    s.sendall(payload)
-                elif type_ == TYPE_END:
+                    t = threading.Thread(target=handle_channel, args=(ws, chan, s), daemon=True)
+                    t.start()
+                    s.sendall(data)
+                elif type_ == 2:  # end
                     pass
-
         except Exception as e:
             print(f"[HA Relay] Disconnected ({e}), retrying in 5 s ...")
             time.sleep(5)
