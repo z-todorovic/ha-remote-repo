@@ -20,7 +20,7 @@ echo "HA_HOST=$HA_REMOTE_HA_HOST"
 echo "HA_PORT=$HA_REMOTE_HA_PORT"
 
 echo "[HA Remote] Launching Python..."
-python3 /ha_remote_relay.py || echo "Python exited with code $?"
+python3 -u /ha_remote_relay.py || echo "Python exited with code $?"
 
 echo "[HA Remote] Script ended."
 sleep 999999
