@@ -1,91 +1,49 @@
 #!/usr/bin/env python3
-import os
-import asyncio
-import requests
-import websockets
-import sys
+import os, socket, struct, time, threading, websocket
 
-# ==============================================================
-#  HA Remote Relay - Version 1.2 (debug edition)
-#  Transparent tunnel between Home Assistant and remote server
-# ==============================================================
+SERVER = os.getenv("HA_REMOTE_SERVER", "wss://cometgps.com/ha-remote/ws/tunnel/test1")
+HA_HOST = os.getenv("HA_REMOTE_HA_HOST", "127.0.0.1")
+HA_PORT = int(os.getenv("HA_REMOTE_HA_PORT", "8123"))
 
-def discover_local_ha():
-    """Detect HA host and port via Supervisor API or environment."""
-    api = os.getenv("SUPERVISOR_API")
-    token = os.getenv("SUPERVISOR_TOKEN")
-    if api and token:
-        try:
-            r = requests.get(
-                f"{api}/core/info",
-                headers={"Authorization": f"Bearer {token}"},
-                timeout=5,
-            )
-            data = r.json().get("data", {})
-            host = data.get("host", "127.0.0.1")
-            port = int(data.get("port", 8123))
-            print(f"[HA Remote] Discovered HA core at {host}:{port}")
-            return host, port
-        except Exception as e:
-            print(f"[HA Remote] Supervisor query failed ({e}), falling back.")
-    host = os.getenv("HA_REMOTE_HA_HOST", "127.0.0.1").strip()
-    port_str = os.getenv("HA_REMOTE_HA_PORT", "8123").strip()
+def handle_channel(ws, chan_id, sock):
     try:
-        port = int(port_str)
-    except ValueError:
-        print(f"[HA Remote] Warning: invalid port '{port_str}', using 8123")
-        port = 8123
-    return host, port
-
-
-SERVER = os.getenv("HA_REMOTE_SERVER", "ws://localhost:8080/ha-remote/ws/tunnel/test1").strip()
-LOCAL_HA = discover_local_ha()
-
-
-async def bridge(ws, reader, writer):
-    """Bidirectional binary bridge between WebSocket and local TCP socket."""
-    async def ws_to_tcp():
-        async for msg in ws:
-            if isinstance(msg, bytes):
-                writer.write(msg)
-                await writer.drain()
-
-    async def tcp_to_ws():
         while True:
-            data = await reader.read(4096)
+            data = sock.recv(8192)
             if not data:
                 break
-            await ws.send(data)
+            frame = struct.pack("!BIB", 1, chan_id, 0) + struct.pack("!H", len(data)) + data
+            ws.send_binary(frame)
+    except Exception:
+        pass
+    finally:
+        sock.close()
 
-    await asyncio.gather(ws_to_tcp(), tcp_to_ws())
-
-
-async def main():
-    reconnect_delay = 5
-    print("[HA Remote] Entered main() loop")
-
+def connect_loop():
     while True:
         try:
-            print(f"[HA Remote] Trying to connect to {SERVER}")
-            async with websockets.connect(
-                SERVER, max_size=None, ping_interval=20, ping_timeout=20
-            ) as ws:
-                print(f"[HA Remote] Connected to {SERVER}")
-                reader, writer = await asyncio.open_connection(*LOCAL_HA)
-                print(f"[HA Remote] Connected to local HA at {LOCAL_HA[0]}:{LOCAL_HA[1]}")
-                await bridge(ws, reader, writer)
-        except Exception as e:
-            print(f"[HA Remote] Disconnected or failed: {type(e).__name__} - {e}")
-            await asyncio.sleep(reconnect_delay)
+            print(f"[HA Relay] Connecting to {SERVER} ...")
+            ws = websocket.create_connection(SERVER, timeout=10)
+            print("[HA Relay] Connected to Tomcat tunnel.")
+            while True:
+                hdr = ws.recv_frame().data
+                if not hdr or len(hdr) < 8:
+                    continue
+                type_, chan, a, b, c = hdr[0], struct.unpack("!I", hdr[1:5])[0], hdr[5], hdr[6], hdr[7]
+                length = (a << 16) | (b << 8) | c
+                data = ws.recv() if length > 0 else b""
 
+                if type_ == 1:  # data
+                    # open per-channel socket to HA
+                    s = socket.socket()
+                    s.connect((HA_HOST, HA_PORT))
+                    t = threading.Thread(target=handle_channel, args=(ws, chan, s), daemon=True)
+                    t.start()
+                    s.sendall(data)
+                elif type_ == 2:  # end
+                    pass
+        except Exception as e:
+            print(f"[HA Relay] Disconnected ({e}), retrying in 5 s …")
+            time.sleep(5)
 
 if __name__ == "__main__":
-    print(f"[HA Remote] Starting tunnel -> {SERVER}")
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        print("[HA Remote] Interrupted, exiting.")
-        sys.exit(0)
-    except Exception as e:
-        print(f"[HA Remote] Fatal error: {e}")
-        sys.exit(1)
+    connect_loop()
