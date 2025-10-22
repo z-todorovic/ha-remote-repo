@@ -38,11 +38,13 @@ def connect_loop():
     while True:
         try:
             print(f"[HA Relay] Connecting to {SERVER} ...")
-            ws = websocket.create_connection(
-                SERVER,
-                timeout=10,
-                sslopt={"cert_reqs": ssl.CERT_NONE}
-            )
+						ws = websocket.create_connection(
+						    SERVER,
+						    timeout=0,                # never timeout on recv
+						    ping_interval=30,
+						    ping_timeout=10,
+						    sslopt={"cert_reqs": ssl.CERT_NONE}
+						)
             print("[HA Relay] Connected to Tomcat tunnel.")
 
             # Start keep-alive thread
