@@ -42,7 +42,7 @@ def connect_loop():
                 elif type_ == 2:  # end
                     pass
         except Exception as e:
-            print(f"[HA Relay] Disconnected ({e}), retrying in 5 s …")
+            print(f"[HA Relay] Disconnected ({e}), retrying in 5 s")
             time.sleep(5)
 
 if __name__ == "__main__":
