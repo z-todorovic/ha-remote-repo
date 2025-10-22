@@ -46,7 +46,7 @@ async def read_from_ws(websocket, writer):
     try:
         async for msg in websocket:
             if isinstance(msg, str):
-                # JSON or text frames – reserved for control later
+                # JSON or text frames - reserved for control later
                 continue
             writer.write(msg)
             await writer.drain()
