@@ -66,6 +66,7 @@ async def handle_ws():
                 print("[relay] connected")
                 async for msg in ws:
                     # expect text JSON frames
+                    print("[relay] got raw frame len", len(msg))
                     if isinstance(msg, str):
                         try:
                             obj = json.loads(msg)
