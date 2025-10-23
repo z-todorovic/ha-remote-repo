@@ -105,6 +105,7 @@ async def handle_ws():
                         print("[relay] ignoring binary frame of", len(msg))
                         continue
                     print("[relay] got raw frame len", len(msg))
+                    print("[relay] frame preview:", msg[:300])
                     try:
                         obj = json.loads(msg)
                     except Exception as e:
