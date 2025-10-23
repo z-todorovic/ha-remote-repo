@@ -1,5 +1,12 @@
 #!/usr/bin/env python3
-import os, asyncio, websockets, base64, json, socket, traceback, time
+import os
+import asyncio
+import websockets
+import base64
+import json
+import socket
+import traceback
+import time
 
 SERVER = os.getenv("HA_REMOTE_SERVER", "ws://yourserver/ha-remote/ws/tunnel/test1")
 HA_HOST = os.getenv("HA_REMOTE_HA_HOST", "homeassistant")
@@ -57,9 +64,11 @@ async def read_http_response_from_sock(sock):
 async def handle_ws():
     while True:
         try:
-            print(f"[relay] connecting to {SERVER}")
-            async with websockets.connect(SERVER, max_size=None, ping_interval=None, ping_timeout=None) as ws:
-                print("[relay] connected, waiting for frames…")
+            print("[relay] connecting to", SERVER)
+            async with websockets.connect(
+                SERVER, max_size=None, ping_interval=None, ping_timeout=None
+            ) as ws:
+                print("[relay] connected, waiting for frames...")
                 async for msg in ws:
                     if isinstance(msg, bytes):
                         print("[relay] ignoring binary frame of", len(msg))
@@ -76,13 +85,15 @@ async def handle_ws():
 
                     rid = obj["id"]
                     req_raw = base64.b64decode(obj["body"])
-                    print(f"[relay] forwarding to HA ({HA_HOST}:{HA_PORT}) id={rid}")
+                    print("[relay] forwarding to HA", HA_HOST, HA_PORT, "id=", rid)
 
                     try:
                         s = socket.create_connection((HA_HOST, HA_PORT), timeout=5)
                         s.sendall(req_raw)
                         # read full response synchronously
-                        status, headers, body = await asyncio.to_thread(read_http_response_from_sock, s)
+                        status, headers, body = await asyncio.to_thread(
+                            read_http_response_from_sock, s
+                        )
                         s.close()
 
                         res = {
@@ -90,23 +101,10 @@ async def handle_ws():
                             "type": "res",
                             "status": status,
                             "headers": headers,
-                            "body": base64.b64encode(body).decode()
+                            "body": base64.b64encode(body).decode(),
                         }
                         await ws.send(json.dumps(res))
-                        print(f"[relay] sent response id={rid} status={status}")
+                        print("[relay] sent response id=", rid, "status=", status)
                     except Exception as e:
-                        print(f"[relay] error contacting HA: {e}")
-                        res = {"id": rid, "type": "res", "status": 502, "headers": {}, "body": ""}
-                        await ws.send(json.dumps(res))
-
-        except Exception as e:
-            print(f"[relay] disconnected: {e}")
-            traceback.print_exc()
-            await asyncio.sleep(RETRY)
-
-
-if __name__ == "__main__":
-    try:
-        asyncio.run(handle_ws())
-    except KeyboardInterrupt:
-        print("exiting")
+                        print("[relay] error contacting HA:", e)
+                        res = {
