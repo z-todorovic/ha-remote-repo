@@ -7,8 +7,11 @@ import json
 import socket
 import traceback
 
-SERVER = os.getenv("HA_REMOTE_SERVER", "ws://yourserver/ha-remote/ws/tunnel/test1")
-HA_HOST = os.getenv("HA_REMOTE_HA_HOST", "homeassistant")
+# SERVER = os.getenv("HA_REMOTE_SERVER", "ws://yourserver/ha-remote/ws/tunnel/test1")
+# HA_HOST = os.getenv("HA_REMOTE_HA_HOST", "homeassistant")
+# HA_PORT = int(os.getenv("HA_REMOTE_HA_PORT", "8123"))
+SERVER = os.getenv("HA_REMOTE_SERVER", "ws://localhost:8080/ha-remote/ws/tunnel/test1")
+HA_HOST = os.getenv("HA_REMOTE_HA_HOST", "192.168.88.117")
 HA_PORT = int(os.getenv("HA_REMOTE_HA_PORT", "8123"))
 RETRY = 5
 
