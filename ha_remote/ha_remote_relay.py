@@ -14,8 +14,8 @@ HA_PORT = int(os.getenv("HA_REMOTE_HA_PORT", "8123"))
 RETRY = 5
 
 
-async def read_http_response_from_sock(sock):
-    """Blocking read of HTTP response."""
+def read_http_response_from_sock(sock):
+    """Read HTTP response from a socket synchronously."""
     sock.settimeout(10)
     data = b""
     while b"\r\n\r\n" not in data:
@@ -90,7 +90,6 @@ async def handle_ws():
                     try:
                         s = socket.create_connection((HA_HOST, HA_PORT), timeout=5)
                         s.sendall(req_raw)
-                        # read full response synchronously
                         status, headers, body = await asyncio.to_thread(
                             read_http_response_from_sock, s
                         )
@@ -101,10 +100,29 @@ async def handle_ws():
                             "type": "res",
                             "status": status,
                             "headers": headers,
-                            "body": base64.b64encode(body).decode(),
+                            "body": base64.b64encode(body).decode()
                         }
                         await ws.send(json.dumps(res))
                         print("[relay] sent response id=", rid, "status=", status)
                     except Exception as e:
                         print("[relay] error contacting HA:", e)
                         res = {
+                            "id": rid,
+                            "type": "res",
+                            "status": 502,
+                            "headers": {},
+                            "body": ""
+                        }
+                        await ws.send(json.dumps(res))
+
+        except Exception as e:
+            print("[relay] disconnected:", e)
+            traceback.print_exc()
+            await asyncio.sleep(RETRY)
+
+
+if __name__ == "__main__":
+    try:
+        asyncio.run(handle_ws())
+    except KeyboardInterrupt:
+        print("exiting")
