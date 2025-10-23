@@ -6,15 +6,10 @@ HA_HOST = os.getenv("HA_REMOTE_HA_HOST", "homeassistant")
 HA_PORT = int(os.getenv("HA_REMOTE_HA_PORT", "8123"))
 RETRY = 5
 
+
 async def read_http_response_from_sock(sock):
-    """
-    Read HTTP response from connected socket:
-     - read headers until \r\n\r\n
-     - if Content-Length present, read that many bytes
-     - otherwise read until socket closes (fallback)
-    Return (status_int, headers_dict, body_bytes)
-    """
-    sock.settimeout(5)
+    """Blocking read of HTTP response."""
+    sock.settimeout(10)
     data = b""
     while b"\r\n\r\n" not in data:
         chunk = sock.recv(4096)
@@ -22,32 +17,32 @@ async def read_http_response_from_sock(sock):
             break
         data += chunk
     header_part, sep, rest = data.partition(b"\r\n\r\n")
-    header_lines = header_part.decode(errors='replace').split("\r\n")
-    status_line = header_lines[0] if header_lines else "HTTP/1.1 200 OK"
-    status_tok = status_line.split(" ", 2)
-    status = int(status_tok[1]) if len(status_tok) >= 2 and status_tok[1].isdigit() else 200
+    header_lines = header_part.decode(errors="replace").split("\r\n")
+    status = 200
+    if header_lines:
+        parts = header_lines[0].split(" ")
+        if len(parts) > 1 and parts[1].isdigit():
+            status = int(parts[1])
     headers = {}
-    cl = None
+    content_len = None
     for h in header_lines[1:]:
         if ":" in h:
             k, v = h.split(":", 1)
             headers[k.strip()] = v.strip()
             if k.lower().strip() == "content-length":
                 try:
-                    cl = int(v.strip())
+                    content_len = int(v.strip())
                 except:
-                    cl = None
+                    content_len = None
     body = rest
-    if cl is not None:
-        need = cl - len(body)
-        while need > 0:
-            chunk = sock.recv(min(8192, need))
+    if content_len is not None:
+        while len(body) < content_len:
+            chunk = sock.recv(8192)
             if not chunk:
                 break
             body += chunk
-            need -= len(chunk)
     else:
-        # read until close (short timeout)
+        sock.settimeout(1)
         try:
             while True:
                 chunk = sock.recv(8192)
@@ -58,51 +53,57 @@ async def read_http_response_from_sock(sock):
             pass
     return status, headers, body
 
+
 async def handle_ws():
     while True:
         try:
             print(f"[relay] connecting to {SERVER}")
-            async with websockets.connect(SERVER, max_size=None) as ws:
-                print("[relay] connected")
+            async with websockets.connect(SERVER, max_size=None, ping_interval=None, ping_timeout=None) as ws:
+                print("[relay] connected, waiting for frames…")
                 async for msg in ws:
-                    # expect text JSON frames
+                    if isinstance(msg, bytes):
+                        print("[relay] ignoring binary frame of", len(msg))
+                        continue
                     print("[relay] got raw frame len", len(msg))
-                    print("[relay] frame data:", msg[:500])
-                    if isinstance(msg, str):
-                        try:
-                            obj = json.loads(msg)
-                            if obj.get("type") == "req" and "body" in obj and "id" in obj:
-                                rid = obj["id"]
-                                b64 = obj["body"]
-                                req_raw = base64.b64decode(b64)
-                                # forward to local HA
-                                try:
-                                    s = socket.create_connection((HA_HOST, HA_PORT), timeout=5)
-                                    s.sendall(req_raw)
-                                    status, headers, body = await read_http_response_from_sock(s)
-                                    # build response JSON
-                                    res = {
-                                        "id": rid,
-                                        "type": "res",
-                                        "status": status,
-                                        "headers": headers,
-                                        "body": base64.b64encode(body).decode()
-                                    }
-                                    await ws.send(json.dumps(res))
-                                    s.close()
-                                except Exception as e:
-                                    # send an error response
-                                    res = {"id": rid, "type": "res", "status": 502, "headers": {}, "body": base64.b64encode(b"").decode()}
-                                    await ws.send(json.dumps(res))
-                        except Exception as e:
-                            print("bad frame:", e)
-                    else:
-                        # ignore binary frames for now
-                        pass
+                    try:
+                        obj = json.loads(msg)
+                    except Exception as e:
+                        print("[relay] bad JSON:", e)
+                        continue
+
+                    if obj.get("type") != "req" or "body" not in obj:
+                        continue
+
+                    rid = obj["id"]
+                    req_raw = base64.b64decode(obj["body"])
+                    print(f"[relay] forwarding to HA ({HA_HOST}:{HA_PORT}) id={rid}")
+
+                    try:
+                        s = socket.create_connection((HA_HOST, HA_PORT), timeout=5)
+                        s.sendall(req_raw)
+                        # read full response synchronously
+                        status, headers, body = await asyncio.to_thread(read_http_response_from_sock, s)
+                        s.close()
+
+                        res = {
+                            "id": rid,
+                            "type": "res",
+                            "status": status,
+                            "headers": headers,
+                            "body": base64.b64encode(body).decode()
+                        }
+                        await ws.send(json.dumps(res))
+                        print(f"[relay] sent response id={rid} status={status}")
+                    except Exception as e:
+                        print(f"[relay] error contacting HA: {e}")
+                        res = {"id": rid, "type": "res", "status": 502, "headers": {}, "body": ""}
+                        await ws.send(json.dumps(res))
+
         except Exception as e:
-            print("[relay] disconnected:", e)
+            print(f"[relay] disconnected: {e}")
             traceback.print_exc()
             await asyncio.sleep(RETRY)
+
 
 if __name__ == "__main__":
     try:
