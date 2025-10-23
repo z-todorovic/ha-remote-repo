@@ -6,7 +6,6 @@ import base64
 import json
 import socket
 import traceback
-import time
 
 SERVER = os.getenv("HA_REMOTE_SERVER", "ws://yourserver/ha-remote/ws/tunnel/test1")
 HA_HOST = os.getenv("HA_REMOTE_HA_HOST", "homeassistant")
@@ -61,6 +60,38 @@ def read_http_response_from_sock(sock):
     return status, headers, body
 
 
+async def pipe_websocket_to_tcp(ws, sock):
+    """Read binary frames from websocket and send to TCP."""
+    try:
+        async for msg in ws:
+            if isinstance(msg, bytes):
+                sock.sendall(msg)
+    except Exception as e:
+        print("[relay] ws->tcp closed:", e)
+    finally:
+        try:
+            sock.shutdown(socket.SHUT_WR)
+        except Exception:
+            pass
+
+
+async def pipe_tcp_to_websocket(ws, sock):
+    """Read from TCP and send binary frames to websocket."""
+    try:
+        while True:
+            data = sock.recv(4096)
+            if not data:
+                break
+            await ws.send(data)
+    except Exception as e:
+        print("[relay] tcp->ws closed:", e)
+    finally:
+        try:
+            await ws.close()
+        except Exception:
+            pass
+
+
 async def handle_ws():
     while True:
         try:
@@ -85,8 +116,23 @@ async def handle_ws():
 
                     rid = obj["id"]
                     req_raw = base64.b64decode(obj["body"])
-                    print("[relay] forwarding to HA", HA_HOST, HA_PORT, "id=", rid)
+                    # Detect if this is a websocket upgrade request
+                    if b"GET /api/websocket" in req_raw:
+                        print("[relay] websocket upgrade requested, bridging...")
+                        try:
+                            sock = socket.create_connection((HA_HOST, HA_PORT), timeout=5)
+                            sock.sendall(req_raw)
+                            # Start bidirectional pipe
+                            task1 = asyncio.create_task(pipe_websocket_to_tcp(ws, sock))
+                            task2 = asyncio.create_task(pipe_tcp_to_websocket(ws, sock))
+                            await asyncio.wait([task1, task2], return_when=asyncio.ALL_COMPLETED)
+                            sock.close()
+                        except Exception as e:
+                            print("[relay] websocket bridge failed:", e)
+                        continue
 
+                    # Normal HTTP request
+                    print("[relay] forwarding to HA", HA_HOST, HA_PORT, "id=", rid)
                     try:
                         s = socket.create_connection((HA_HOST, HA_PORT), timeout=5)
                         s.sendall(req_raw)
@@ -94,13 +140,12 @@ async def handle_ws():
                             read_http_response_from_sock, s
                         )
                         s.close()
-
                         res = {
                             "id": rid,
                             "type": "res",
                             "status": status,
                             "headers": headers,
-                            "body": base64.b64encode(body).decode()
+                            "body": base64.b64encode(body).decode(),
                         }
                         await ws.send(json.dumps(res))
                         print("[relay] sent response id=", rid, "status=", status)
@@ -111,7 +156,7 @@ async def handle_ws():
                             "type": "res",
                             "status": 502,
                             "headers": {},
-                            "body": ""
+                            "body": "",
                         }
                         await ws.send(json.dumps(res))
 
