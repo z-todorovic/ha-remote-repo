@@ -77,7 +77,7 @@ async def handle_ws():
                                 try:
                                     s = socket.create_connection((HA_HOST, HA_PORT), timeout=5)
                                     s.sendall(req_raw)
-                                    status, headers, body = await asyncio.get_event_loop().run_in_executor(None, lambda: read_http_response_from_sock(s))
+                                    status, headers, body = await read_http_response_from_sock(s)
                                     # build response JSON
                                     res = {
                                         "id": rid,
