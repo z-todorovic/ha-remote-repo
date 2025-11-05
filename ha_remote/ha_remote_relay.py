@@ -5,20 +5,12 @@ import json
 import uuid
 import signal
 import sys
-import weakref
 from pathlib import Path
 
 TUNNEL_HOST = os.getenv("HA_REMOTE_TUNNEL_HOST", "tunnel.cometgps.com")
 TUNNEL_PORT = os.getenv("HA_REMOTE_TUNNEL_PORT", 2345)
 # TUNNEL_HOST = "127.0.0.1"
 # TUNNEL_PORT = 2345
-
-_live_tasks = weakref.WeakSet()
-
-def spawnTask(coro):
-    t = asyncio.create_task(coro)
-    _live_tasks.add(t)
-    return t
 
 def handle_stop(*_):
     print("Received stop signal → shutting down")
@@ -64,32 +56,48 @@ async def pipe(reader, writer):
                 break
             writer.write(data)
             await writer.drain()
-    except (asyncio.CancelledError, ConnectionResetError, BrokenPipeError):
+    except asyncio.CancelledError:
+        # we were asked to stop
         pass
-    except Exception as e:
-        print(f"[pipe] {e}")
+    except Exception:
+        # ignore other IO errors
+        pass
     finally:
+        writer.close()
         try:
-            writer.close()
             await writer.wait_closed()
         except Exception:
             pass
 
 async def handle_active_connection(reader_tunnel, writer_tunnel, first_chunk):
-    """Forward an active tunnel connection to HA."""
     try:
         print("[FORWARD] Opening HA connection...")
         ha_reader, ha_writer = await asyncio.open_connection(LOCAL_HA[0], LOCAL_HA[1])
         ha_writer.write(first_chunk)
         await ha_writer.drain()
 
-        task1 = spawnTask(pipe(reader_tunnel, ha_writer))
-        task2 = spawnTask(pipe(ha_reader, writer_tunnel))
-        await asyncio.wait([task1, task2], return_when=asyncio.FIRST_COMPLETED)
+        t1 = asyncio.create_task(pipe(reader_tunnel, ha_writer))
+        t2 = asyncio.create_task(pipe(ha_reader, writer_tunnel))
+
+        done, pending = await asyncio.wait(
+            {t1, t2},
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+
+        # one direction is done → kill the other direction too
+        for p in pending:
+            p.cancel()
+        # make sure the cancelled one actually finishes
+        await asyncio.gather(*pending, return_exceptions=True)
+
     except Exception as e:
         print(f"[ERROR] {e}")
     finally:
         writer_tunnel.close()
+        try:
+            await writer_tunnel.wait_closed()
+        except Exception:
+            pass
         print("[FORWARD] Session closed")
 
 async def keep_idle_connection():
@@ -119,7 +127,7 @@ async def keep_idle_connection():
                 continue
 
             # Immediately spawn a new idle connection
-            spawnTask(keep_idle_connection())
+            asyncio.create_task(keep_idle_connection())
 
             # Continue as active handler
             await handle_active_connection(reader, writer, first_chunk)
