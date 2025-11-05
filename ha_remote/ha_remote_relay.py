@@ -78,6 +78,8 @@ async def handle_active_connection(reader_tunnel, writer_tunnel, first_chunk):
         task1 = asyncio.create_task(pipe(reader_tunnel, ha_writer))
         task2 = asyncio.create_task(pipe(ha_reader, writer_tunnel))
         await asyncio.wait([task1, task2], return_when=asyncio.FIRST_COMPLETED)
+        task1.cancel
+        task2.cancel
     except Exception as e:
         print(f"[ERROR] {e}")
     finally:
