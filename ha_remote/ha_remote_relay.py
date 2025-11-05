@@ -26,38 +26,15 @@ def discover_local_ha():
     return "127.0.0.1", 8123
 
 def get_ha_instance_id():
-    HA_CORE_CONFIG = Path("/config/.storage/core.config")
-    ADDON_ID_FILE  = Path("/share/ha_instance_id.json")
+    cachedInstanceIdFile  = Path("/share/ha_instance_id.json")
     try:
-        # If we've already cached it, reuse
-        if ADDON_ID_FILE.exists():
+        if cachedInstanceIdFile.exists():
             try:
-                print("Addon file")
-                return json.loads(ADDON_ID_FILE.read_text())["instance_id"]
+                return json.loads(cachedInstanceIdFile.read_text())["instance_id"]
             except Exception:
                 pass
-
-        # Try to read the official HA instance_id
-        if HA_CORE_CONFIG.exists():
-            try:
-                data = json.loads(HA_CORE_CONFIG.read_text())
-                ha_id = data["data"]["instance_id"]
-                # cache it for reliability
-                ADDON_ID_FILE.write_text(json.dumps({"instance_id": ha_id}))
-                print("HA config")
-                return ha_id
-            except Exception:
-                pass
-
-        # Fallback to machine-id
-        try:
-            ha_id = Path("/etc/machine-id").read_text().strip()
-        except Exception:
-            ha_id = uuid.uuid4().hex
-            print("Generated")
-
-        # store fallback for later reuse
-        ADDON_ID_FILE.write_text(json.dumps({"instance_id": ha_id}))
+        ha_id = uuid.uuid4().hex
+        cachedInstanceIdFile.write_text(json.dumps({"instance_id": ha_id}))
         return ha_id
     except:
         return "test1"
