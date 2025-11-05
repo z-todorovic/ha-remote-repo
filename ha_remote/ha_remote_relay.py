@@ -32,6 +32,7 @@ def get_ha_instance_id():
         # If we've already cached it, reuse
         if ADDON_ID_FILE.exists():
             try:
+                print("Addon file")
                 return json.loads(ADDON_ID_FILE.read_text())["instance_id"]
             except Exception:
                 pass
@@ -43,6 +44,7 @@ def get_ha_instance_id():
                 ha_id = data["data"]["instance_id"]
                 # cache it for reliability
                 ADDON_ID_FILE.write_text(json.dumps({"instance_id": ha_id}))
+                print("HA config")
                 return ha_id
             except Exception:
                 pass
@@ -52,6 +54,7 @@ def get_ha_instance_id():
             ha_id = Path("/etc/machine-id").read_text().strip()
         except Exception:
             ha_id = uuid.uuid4().hex
+            print("Generated")
 
         # store fallback for later reuse
         ADDON_ID_FILE.write_text(json.dumps({"instance_id": ha_id}))
