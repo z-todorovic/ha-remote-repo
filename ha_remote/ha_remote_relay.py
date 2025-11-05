@@ -48,6 +48,12 @@ def get_ha_instance_id():
     except:
         return "test1"
 
+async def sleep_interruptible(seconds):
+    try:
+        await asyncio.wait_for(stopping.wait(), timeout=seconds)
+    except asyncio.TimeoutError:
+        pass
+
 async def pipe(reader, writer):
     try:
         while not stopping.is_set():
@@ -109,9 +115,9 @@ async def keep_idle_connection():
                     writer.write(b'\x00')
                     await writer.drain()
 
-            if not first_chunk:
+            if not first_chunk or stopping.is_set():
                 writer.close()
-                await asyncio.sleep(1)
+                sleep_interruptible(1)
                 continue
 
             # Immediately spawn a new idle connection
@@ -123,7 +129,7 @@ async def keep_idle_connection():
 
         except Exception as e:
             print(f"[IDLE] Error: {e}, retry in 3s")
-            await asyncio.sleep(3)
+            sleep_interruptible(3)
 
 async def main():
     signal.signal(signal.SIGTERM, handle_stop)
