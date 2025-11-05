@@ -5,6 +5,7 @@ import json
 import uuid
 import signal
 import sys
+import weakref
 from pathlib import Path
 
 TUNNEL_HOST = os.getenv("HA_REMOTE_TUNNEL_HOST", "tunnel.cometgps.com")
@@ -12,7 +13,12 @@ TUNNEL_PORT = os.getenv("HA_REMOTE_TUNNEL_PORT", 2345)
 # TUNNEL_HOST = "127.0.0.1"
 # TUNNEL_PORT = 2345
 
-tasks = set()
+_live_tasks = weakref.WeakSet()
+
+def spawnTask(coro):
+    t = asyncio.create_task(coro)
+    _live_tasks.add(t)
+    return t
 
 def handle_stop(*_):
     print("Received stop signal → shutting down")
@@ -77,10 +83,8 @@ async def handle_active_connection(reader_tunnel, writer_tunnel, first_chunk):
         ha_writer.write(first_chunk)
         await ha_writer.drain()
 
-        task1 = asyncio.create_task(pipe(reader_tunnel, ha_writer))
-        task2 = asyncio.create_task(pipe(ha_reader, writer_tunnel))
-        tasks.add(task1)
-        tasks.add(task2)
+        task1 = spawnTask(pipe(reader_tunnel, ha_writer))
+        task2 = spawnTask(pipe(ha_reader, writer_tunnel))
         await asyncio.wait([task1, task2], return_when=asyncio.FIRST_COMPLETED)
     except Exception as e:
         print(f"[ERROR] {e}")
@@ -115,7 +119,7 @@ async def keep_idle_connection():
                 continue
 
             # Immediately spawn a new idle connection
-            tasks.add(asyncio.create_task(keep_idle_connection()))
+            spawnTask(asyncio.create_task(keep_idle_connection()))
 
             # Continue as active handler
             await handle_active_connection(reader, writer, first_chunk)
