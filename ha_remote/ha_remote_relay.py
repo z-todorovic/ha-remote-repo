@@ -12,6 +12,8 @@ TUNNEL_PORT = os.getenv("HA_REMOTE_TUNNEL_PORT", 2345)
 # TUNNEL_HOST = "127.0.0.1"
 # TUNNEL_PORT = 2345
 
+tasks = set()
+
 def handle_stop(*_):
     print("Received stop signal → shutting down")
     sys.exit(0)
@@ -77,9 +79,9 @@ async def handle_active_connection(reader_tunnel, writer_tunnel, first_chunk):
 
         task1 = asyncio.create_task(pipe(reader_tunnel, ha_writer))
         task2 = asyncio.create_task(pipe(ha_reader, writer_tunnel))
+        tasks.add(task1)
+        tasks.add(task2)
         await asyncio.wait([task1, task2], return_when=asyncio.FIRST_COMPLETED)
-        task1.cancel
-        task2.cancel
     except Exception as e:
         print(f"[ERROR] {e}")
     finally:
@@ -113,7 +115,7 @@ async def keep_idle_connection():
                 continue
 
             # Immediately spawn a new idle connection
-            asyncio.create_task(keep_idle_connection())
+            tasks.add(asyncio.create_task(keep_idle_connection()))
 
             # Continue as active handler
             await handle_active_connection(reader, writer, first_chunk)
