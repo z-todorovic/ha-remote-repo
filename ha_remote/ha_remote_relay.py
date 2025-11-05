@@ -1,3 +1,5 @@
+import contextlib
+import io
 import os
 import requests
 import asyncio
@@ -45,21 +47,15 @@ def get_ha_instance_id():
         ha_id = uuid.uuid4().hex
         cachedInstanceIdFile.write_text(json.dumps({"instance_id": ha_id}))
         return ha_id
-    except:
+    except Exception:
         return "test1"
-
-async def sleep_interruptible(seconds):
-    try:
-        await asyncio.wait_for(stopping.wait(), timeout=seconds)
-    except asyncio.TimeoutError:
-        pass
 
 async def pipe(reader, writer):
     try:
         while not stopping.is_set():
             data = await reader.read(8192)
             if not data:
-                breakpoint
+                break
             writer.write(data)
             await writer.drain()
     except Exception:
@@ -117,19 +113,19 @@ async def keep_idle_connection():
 
             if not first_chunk or stopping.is_set():
                 writer.close()
-                await sleep_interruptible(1)
+                await asyncio.sleep(1)
                 continue
 
-            # Immediately spawn a new idle connection
             asyncio.create_task(keep_idle_connection())
 
-            # Continue as active handler
             await handle_active_connection(reader, writer, first_chunk)
             break
 
         except Exception as e:
+            if "GeneratorExit" in str(e) or stopping.is_set():
+                break 
             print(f"[IDLE] Error: {e}, retry in 3s")
-            await sleep_interruptible(3)
+            await asyncio.sleep(3)
 
 async def main():
     signal.signal(signal.SIGTERM, handle_stop)
@@ -141,5 +137,9 @@ async def main():
 
 LOCAL_HA = discover_local_ha()
 HA_INSTANCE_ID = get_ha_instance_id()
+# LOCAL_HA = "192.168.88.117", 8123
+# HA_INSTANCE_ID = "7433b6d93787482d87bbbfe937fcd369"
 
-asyncio.run(main())
+
+with contextlib.redirect_stderr(io.StringIO()):
+    asyncio.run(main())
