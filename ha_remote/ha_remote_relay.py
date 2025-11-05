@@ -27,7 +27,7 @@ def discover_local_ha():
 
 def get_ha_instance_id():
     HA_CORE_CONFIG = Path("/config/.storage/core.config")
-    ADDON_ID_FILE  = Path("/data/ha_instance_id.json")
+    ADDON_ID_FILE  = Path("/share/ha_instance_id.json")
     try:
         # If we've already cached it, reuse
         if ADDON_ID_FILE.exists():
