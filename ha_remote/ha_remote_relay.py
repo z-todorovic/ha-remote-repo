@@ -4,6 +4,7 @@ import asyncio
 import json
 import uuid
 import signal
+import sys
 from pathlib import Path
 
 TUNNEL_HOST = os.getenv("HA_REMOTE_TUNNEL_HOST", "tunnel.cometgps.com")
@@ -13,7 +14,7 @@ TUNNEL_PORT = os.getenv("HA_REMOTE_TUNNEL_PORT", 2345)
 
 def handle_stop(*_):
     print("Received stop signal → shutting down")
-    os._exit(0)
+    sys.exit(0)
 
 signal.signal(signal.SIGTERM, handle_stop)
 signal.signal(signal.SIGINT, handle_stop)
