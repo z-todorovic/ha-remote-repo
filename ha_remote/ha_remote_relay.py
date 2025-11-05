@@ -92,7 +92,9 @@ async def keep_idle_connection():
         try:
             print(f"[IDLE] Connecting to {TUNNEL_HOST}:{TUNNEL_PORT}")
             reader, writer = await asyncio.open_connection(TUNNEL_HOST, TUNNEL_PORT)
-            writer.write(HA_INSTANCE_ID.ljust(16, '\0').encode('ascii'))
+            id_bytes = HA_INSTANCE_ID.encode("utf-8")
+            writer.write(bytes([len(id_bytes)]))
+            writer.write(id_bytes)
             await writer.drain()
             print("[IDLE] Connected and identified. Waiting for data...")
 
