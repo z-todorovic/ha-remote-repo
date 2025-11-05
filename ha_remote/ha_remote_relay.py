@@ -119,7 +119,7 @@ async def keep_idle_connection():
                 continue
 
             # Immediately spawn a new idle connection
-            spawnTask(asyncio.create_task(keep_idle_connection()))
+            spawnTask(keep_idle_connection())
 
             # Continue as active handler
             await handle_active_connection(reader, writer, first_chunk)
