@@ -50,13 +50,22 @@ def get_ha_instance_id():
 
 async def pipe(reader, writer):
     try:
-        while data := await reader.read(8192):
+        while True:
+            data = await reader.read(8192)
+            if not data:
+                break
             writer.write(data)
             await writer.drain()
-    except Exception:
+    except (asyncio.CancelledError, ConnectionResetError, BrokenPipeError):
         pass
+    except Exception as e:
+        print(f"[pipe] {e}")
     finally:
-        writer.close()
+        try:
+            writer.close()
+            await writer.wait_closed()
+        except Exception:
+            pass
 
 async def handle_active_connection(reader_tunnel, writer_tunnel, first_chunk):
     """Forward an active tunnel connection to HA."""
