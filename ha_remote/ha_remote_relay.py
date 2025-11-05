@@ -1,12 +1,63 @@
+import os
+import requests
 import asyncio
+import json
+import uuid
+from pathlib import Path
 
-# TUNNEL_HOST = "tunnel.cometgps.com"
+TUNNEL_HOST = os.getenv("HA_REMOTE_TUNNEL_HOST", "tunnel.cometgps.com")
+TUNNEL_PORT = os.getenv("HA_REMOTE_TUNNEL_PORT", 2345)
+# TUNNEL_HOST = "127.0.0.1"
 # TUNNEL_PORT = 2345
-TUNNEL_HOST = "127.0.0.1"
-TUNNEL_PORT = 2345
-CLIENT_ID = "test1".ljust(16, '\0')  # pad with NULs
-HA_HOST = "192.168.88.117"
-HA_PORT = 8123
+
+def discover_local_ha():
+    api = os.getenv("SUPERVISOR_API")
+    token = os.getenv("SUPERVISOR_TOKEN")
+    if api and token:
+        try:
+            r = requests.get(f"{api}/core/info",
+                             headers={"Authorization": f"Bearer {token}"},
+                             timeout=5)
+            data = r.json().get("data", {})
+            return data.get("host", "127.0.0.1"), int(data.get("port", 8123))
+        except Exception as e:
+            print("Supervisor query failed:", e)
+    # fallback (Core install / Windows test)
+    return "127.0.0.1", 8123
+
+def get_ha_instance_id():
+    HA_CORE_CONFIG = Path("/config/.storage/core.config")
+    ADDON_ID_FILE  = Path("/data/ha_instance_id.json")
+    try:
+        # If we've already cached it, reuse
+        if ADDON_ID_FILE.exists():
+            try:
+                return json.loads(ADDON_ID_FILE.read_text())["instance_id"]
+            except Exception:
+                pass
+
+        # Try to read the official HA instance_id
+        if HA_CORE_CONFIG.exists():
+            try:
+                data = json.loads(HA_CORE_CONFIG.read_text())
+                ha_id = data["data"]["instance_id"]
+                # cache it for reliability
+                ADDON_ID_FILE.write_text(json.dumps({"instance_id": ha_id}))
+                return ha_id
+            except Exception:
+                pass
+
+        # Fallback to machine-id
+        try:
+            ha_id = Path("/etc/machine-id").read_text().strip()
+        except Exception:
+            ha_id = uuid.uuid4().hex
+
+        # store fallback for later reuse
+        ADDON_ID_FILE.write_text(json.dumps({"instance_id": ha_id}))
+        return ha_id
+    except:
+        return "test1"
 
 async def pipe(reader, writer):
     try:
@@ -22,7 +73,7 @@ async def handle_active_connection(reader_tunnel, writer_tunnel, first_chunk):
     """Forward an active tunnel connection to HA."""
     try:
         print("[FORWARD] Opening HA connection...")
-        ha_reader, ha_writer = await asyncio.open_connection(HA_HOST, HA_PORT)
+        ha_reader, ha_writer = await asyncio.open_connection(LOCAL_HA[0], LOCAL_HA[1])
         ha_writer.write(first_chunk)
         await ha_writer.drain()
 
@@ -41,12 +92,19 @@ async def keep_idle_connection():
         try:
             print(f"[IDLE] Connecting to {TUNNEL_HOST}:{TUNNEL_PORT}")
             reader, writer = await asyncio.open_connection(TUNNEL_HOST, TUNNEL_PORT)
-            writer.write(CLIENT_ID.encode('ascii'))
+            writer.write(HA_INSTANCE_ID.ljust(16, '\0').encode('ascii'))
             await writer.drain()
             print("[IDLE] Connected and identified. Waiting for data...")
 
             # Wait for first byte from server/user
-            first_chunk = await reader.read(1)
+            while True:
+                try:
+                    first_chunk = await asyncio.wait_for(reader.read(1), 5)
+                    break
+                except asyncio.TimeoutError:
+                    writer.write(b'\x00')
+                    await writer.drain()
+
             if not first_chunk:
                 writer.close()
                 await asyncio.sleep(1)
@@ -57,9 +115,19 @@ async def keep_idle_connection():
 
             # Continue as active handler
             await handle_active_connection(reader, writer, first_chunk)
+            break
 
         except Exception as e:
             print(f"[IDLE] Error: {e}, retry in 3s")
             await asyncio.sleep(3)
 
-asyncio.run(keep_idle_connection())
+async def main():
+    print(f"HA instance ID: {HA_INSTANCE_ID}")
+    print(f"Local HA: {LOCAL_HA[0]}:{LOCAL_HA[1]}")
+    asyncio.create_task(keep_idle_connection())
+    await asyncio.Event().wait()
+
+LOCAL_HA = discover_local_ha()
+HA_INSTANCE_ID = get_ha_instance_id()
+
+asyncio.run(main())

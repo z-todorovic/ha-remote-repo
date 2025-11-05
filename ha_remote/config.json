@@ -8,14 +8,12 @@
   "host_network": true,
   "homeassistant_api": true,
   "options": {
-    "server": "wss://cometgps.com/ha-remote/ws/tunnel/test1",
-    "ha_host": "127.0.0.1",
-    "ha_port": 8123
+    "tunnel_host": "tunnel.cometgps.com",
+    "tunnel_port": 2345
   },
   "schema": {
-    "server": "str",
-    "ha_host": "str",
-    "ha_port": "int"
+    "tunnel_host": "str",
+    "tunnel_port": "int"
   },
   "arch": ["aarch64", "amd64", "armv7", "i386"]
 }
