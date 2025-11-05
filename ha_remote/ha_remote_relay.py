@@ -117,7 +117,7 @@ async def keep_idle_connection():
 
             if not first_chunk or stopping.is_set():
                 writer.close()
-                sleep_interruptible(1)
+                await sleep_interruptible(1)
                 continue
 
             # Immediately spawn a new idle connection
@@ -129,7 +129,7 @@ async def keep_idle_connection():
 
         except Exception as e:
             print(f"[IDLE] Error: {e}, retry in 3s")
-            sleep_interruptible(3)
+            await sleep_interruptible(3)
 
 async def main():
     signal.signal(signal.SIGTERM, handle_stop)
