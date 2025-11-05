@@ -15,7 +15,10 @@ echo "TUNNEL_HOST=$HA_REMOTE_TUNNEL_HOST"
 echo "TUNNEL_PORT=$HA_REMOTE_TUNNEL_PORT"
 
 echo "[HA Remote] Launching Python..."
-python3 -u /ha_remote_relay.py || echo "Python exited with code $?"
-
+python3 -u /ha_remote_relay.py
+code=$?
+echo "[HA Remote] Python exited with code $code"
 echo "[HA Remote] Script ended."
+exit $code
+
 sleep 999999
