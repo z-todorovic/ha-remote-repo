@@ -56,18 +56,18 @@ async def pipe(reader, writer):
                 break
             writer.write(data)
             await writer.drain()
-    except asyncio.CancelledError:
-        # we were asked to stop
+    except (asyncio.CancelledError, GeneratorExit):
+        # loop is shutting down or task cancelled
         pass
     except Exception:
-        # ignore other IO errors
         pass
     finally:
-        writer.close()
-        try:
-            await writer.wait_closed()
-        except Exception:
-            pass
+        if not writer.is_closing():
+            writer.close()
+            try:
+                await writer.wait_closed()
+            except Exception:
+                pass
 
 async def handle_active_connection(reader_tunnel, writer_tunnel, first_chunk):
     try:
@@ -101,42 +101,47 @@ async def handle_active_connection(reader_tunnel, writer_tunnel, first_chunk):
         print("[FORWARD] Session closed")
 
 async def keep_idle_connection():
-    """Maintain one idle connection, spawn new one when triggered."""
-    while True:
-        try:
-            print(f"[IDLE] Connecting to {TUNNEL_HOST}:{TUNNEL_PORT}")
-            reader, writer = await asyncio.open_connection(TUNNEL_HOST, TUNNEL_PORT)
-            id_bytes = HA_INSTANCE_ID.encode("utf-8")
-            writer.write(bytes([len(id_bytes)]))
-            writer.write(id_bytes)
-            await writer.drain()
-            print("[IDLE] Connected and identified. Waiting for data...")
+    try:
+        while not stopping.is_set():
+            try:
+                reader, writer = await asyncio.open_connection(TUNNEL_HOST, TUNNEL_PORT)
+                id_bytes = HA_INSTANCE_ID.encode()
+                writer.write(bytes([len(id_bytes)]))
+                writer.write(id_bytes)
+                await writer.drain()
 
-            # Wait for first byte from server/user
-            while True:
-                try:
-                    first_chunk = await asyncio.wait_for(reader.read(1), 5)
+                while not stopping.is_set():
+                    try:
+                        first_chunk = await asyncio.wait_for(reader.read(1), 5)
+                        break
+                    except asyncio.TimeoutError:
+                        writer.write(b"\x00")
+                        await writer.drain()
+                else:
                     break
-                except asyncio.TimeoutError:
-                    writer.write(b'\x00')
-                    await writer.drain()
 
-            if not first_chunk:
-                writer.close()
-                await asyncio.sleep(1)
-                continue
+                if not first_chunk or stopping.is_set():
+                    writer.close()
+                    await asyncio.sleep(1)
+                    continue
 
-            # Immediately spawn a new idle connection
-            asyncio.create_task(keep_idle_connection())
-
-            # Continue as active handler
-            await handle_active_connection(reader, writer, first_chunk)
-            break
-
-        except Exception as e:
-            print(f"[IDLE] Error: {e}, retry in 3s")
-            await asyncio.sleep(3)
-
+                spawn(keep_idle_connection())     # your safe task spawner
+                await handle_active_connection(reader, writer, first_chunk)
+            except (asyncio.CancelledError, GeneratorExit):
+                # shutdown requested
+                break
+            except Exception as e:
+                if stopping.is_set():
+                    break
+                print(f"[IDLE] Error: {e}, retry in 3s")
+                await asyncio.sleep(3)
+    finally:
+        try:
+            writer.close()
+            await writer.wait_closed()
+        except Exception:
+            pass
+        
 async def main():
     print(f"HA instance ID: {HA_INSTANCE_ID}")
     print(f"Local HA: {LOCAL_HA[0]}:{LOCAL_HA[1]}")
