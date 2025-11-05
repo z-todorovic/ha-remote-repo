@@ -15,5 +15,6 @@
     "tunnel_host": "str",
     "tunnel_port": "int"
   },
+  "map": ["config:rw"],
   "arch": ["aarch64", "amd64", "armv7", "i386"]
 }
