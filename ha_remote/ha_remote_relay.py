@@ -15,6 +15,13 @@ TUNNEL_PORT = os.getenv("HA_REMOTE_TUNNEL_PORT", 2345)
 # TUNNEL_PORT = 2345
 
 stopping = asyncio.Event()
+_live = set()
+
+def spawn(coro):
+    task = asyncio.create_task(coro)
+    _live.add(task)
+    task.add_done_callback(lambda task: (_live.discard(task), print(f"[SPAWN] Removed task: {task}; Live tasks: {len(_live)}")))
+    return task
 
 def handle_stop(*_):
     print("Received stop signal → shutting down")
@@ -50,42 +57,77 @@ def get_ha_instance_id():
     except Exception:
         return "test1"
 
-async def pipe(reader, writer):
+async def pipe_tunnel_to_ha(tunnel_reader, tunnel_writer, ha_writer, first_chunk):
     try:
+        length = int.from_bytes(first_chunk)
         while not stopping.is_set():
-            data = await reader.read(8192)
-            if not data:
-                break
-            writer.write(data)
-            await writer.drain()
-    except Exception:
+            if length > 0:
+                data = await tunnel_reader.readexactly(length)
+                ha_writer.write(data)
+                await ha_writer.drain()
+            while not stopping.is_set():
+                try:
+                    bytes = await asyncio.wait_for(tunnel_reader.readexactly(2), 5)
+                    length = int.from_bytes(bytes)
+                    break
+                except asyncio.TimeoutError:
+                    tunnel_writer.write(b'\x00\x00')
+                    await tunnel_writer.drain()
+    except asyncio.CancelledError:
+        pass
+    except Exception as ex:
         pass
     finally:
-        if not writer.is_closing():
-            writer.close()
+        if not ha_writer.is_closing():
+            ha_writer.close()
             try:
-                await writer.wait_closed()
+                await ha_writer.wait_closed()
             except Exception:
                 pass
 
-async def handle_active_connection(reader_tunnel, writer_tunnel, first_chunk):
+async def pipe_ha_to_tunnel(ha_reader, tunnel_writer):
+    try:
+        while not stopping.is_set():
+            data = await ha_reader.read(8192)
+            if not data:
+                break
+            data_length = len(data)
+            bytes = data_length.to_bytes(2, 'big')
+            tunnel_writer.write(bytes)
+            tunnel_writer.write(data)
+            await tunnel_writer.drain()
+    except asyncio.CancelledError:
+        pass
+    except Exception as ex:
+        pass
+    finally:
+        if not tunnel_writer.is_closing():
+            tunnel_writer.close()
+            try:
+                await tunnel_writer.wait_closed()
+            except Exception:
+                pass
+
+async def handle_active_connection(tunnel_reader, tunnel_writer, first_chunk):
     """Forward an active tunnel connection to HA."""
     try:
         print("[FORWARD] Opening HA connection...")
         ha_reader, ha_writer = await asyncio.open_connection(LOCAL_HA[0], LOCAL_HA[1])
-        ha_writer.write(first_chunk)
-        await ha_writer.drain()
 
-        task1 = asyncio.create_task(pipe(reader_tunnel, ha_writer))
-        task2 = asyncio.create_task(pipe(ha_reader, writer_tunnel))
-        await asyncio.wait([task1, task2], return_when=asyncio.FIRST_COMPLETED)
+        task1 = spawn(pipe_tunnel_to_ha(tunnel_reader, tunnel_writer, ha_writer, first_chunk))
+        task2 = spawn(pipe_ha_to_tunnel(ha_reader, tunnel_writer))
+        # await asyncio.wait([task1, task2], return_when=asyncio.FIRST_COMPLETED)
+        done, pending = await asyncio.wait({task1, task2}, return_when=asyncio.FIRST_COMPLETED)
+        for p in pending:
+            p.cancel()
+        await asyncio.gather(*pending, return_exceptions=True)
     except Exception as e:
         print(f"[ERROR] {e}")
     finally:
-        if not writer_tunnel.is_closing():
-            writer_tunnel.close()
+        for w in (tunnel_writer, ha_writer):
             try:
-                await writer_tunnel.wait_closed()
+                w.close()
+                await w.wait_closed()
             except Exception:
                 pass
         print("[FORWARD] Session closed")
@@ -101,11 +143,17 @@ async def keep_idle_connection():
             writer.write(id_bytes)
             await writer.drain()
             print("[IDLE] Connected and identified. Waiting for data...")
-
+            print(f"Live tasks: {len(_live)}")
+            # for t in asyncio.all_tasks():
+            #     if not t.done():
+            #         print(t)
+            #         t.print_stack(limit=10)
+            #         break
+                    
             # Wait for first byte from server/user
             while not stopping.is_set():
                 try:
-                    first_chunk = await asyncio.wait_for(reader.read(1), 5)
+                    first_chunk = await asyncio.wait_for(reader.readexactly(2), 5)
                     break
                 except asyncio.TimeoutError:
                     writer.write(b'\x00')
@@ -122,9 +170,9 @@ async def keep_idle_connection():
             break
 
         except Exception as e:
+            print(f"[IDLE] Error: {e}, retry in 3s")
             if "GeneratorExit" in str(e) or stopping.is_set():
                 break 
-            print(f"[IDLE] Error: {e}, retry in 3s")
             await asyncio.sleep(3)
 
 async def main():
@@ -135,11 +183,11 @@ async def main():
     asyncio.create_task(keep_idle_connection())
     await asyncio.Event().wait()
 
-LOCAL_HA = discover_local_ha()
-HA_INSTANCE_ID = get_ha_instance_id()
-# LOCAL_HA = "192.168.88.117", 8123
-# HA_INSTANCE_ID = "7433b6d93787482d87bbbfe937fcd369"
+# LOCAL_HA = discover_local_ha()
+# HA_INSTANCE_ID = get_ha_instance_id()
+LOCAL_HA = "192.168.88.117", 8123
+HA_INSTANCE_ID = "7433b6d93787482d87bbbfe937fcd369"
 
 
-with contextlib.redirect_stderr(io.StringIO()):
-    asyncio.run(main())
+# with contextlib.redirect_stderr(io.StringIO()):
+asyncio.run(main())
