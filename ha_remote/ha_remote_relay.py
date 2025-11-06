@@ -20,7 +20,7 @@ _live = set()
 def spawn(coro):
     task = asyncio.create_task(coro)
     _live.add(task)
-    task.add_done_callback(lambda task: (_live.discard(task), print(f"[SPAWN] Removed task: {task}; Live tasks: {len(_live)}")))
+    task.add_done_callback(lambda task: (_live.discard(task), print(f"Live tasks: {len(_live)}")))
     return task
 
 def handle_stop(*_):
@@ -164,7 +164,7 @@ async def keep_idle_connection():
                 await asyncio.sleep(1)
                 continue
 
-            asyncio.create_task(keep_idle_connection())
+            spawn(keep_idle_connection())
 
             await handle_active_connection(reader, writer, first_chunk)
             break
@@ -180,7 +180,7 @@ async def main():
     signal.signal(signal.SIGINT, handle_stop)
     print(f"HA instance ID: {HA_INSTANCE_ID}")
     print(f"Local HA: {LOCAL_HA[0]}:{LOCAL_HA[1]}")
-    asyncio.create_task(keep_idle_connection())
+    spawn(keep_idle_connection())
     await asyncio.Event().wait()
 
 # LOCAL_HA = discover_local_ha()
@@ -189,5 +189,4 @@ LOCAL_HA = "192.168.88.117", 8123
 HA_INSTANCE_ID = "7433b6d93787482d87bbbfe937fcd369"
 
 
-# with contextlib.redirect_stderr(io.StringIO()):
 asyncio.run(main())
