@@ -17,6 +17,59 @@ TUNNEL_PORT = os.getenv("HA_REMOTE_TUNNEL_PORT", 2345)
 stopping = asyncio.Event()
 _live = set()
 
+def _get_ha_instance_id():
+    # The Supervisor token is automatically available as an environment variable
+    supervisor_token = os.environ.get('SUPERVISOR_TOKEN')
+    if not supervisor_token:
+        return "Error: SUPERVISOR_TOKEN not found."
+
+    # The internal URL to access the Home Assistant Core API via the Supervisor proxy
+    api_url = "http://supervisor/core/api/config"
+
+    # Headers for authentication
+    headers = {
+        "Authorization": f"Bearer {supervisor_token}",
+        "Content-Type": "application/json"
+    }
+
+    try:
+        # Make the request to the API
+        response = requests.get(api_url, headers=headers)
+        response.raise_for_status() # Raise an exception for bad status codes (4xx or 5xx)
+
+        # Parse the JSON response
+        config_data = response.json()
+
+        # The 'location_name' is often used as a unique identifier, but a true 'instance ID' 
+        # is part of the system info, not config.
+        # A better endpoint might be /api/discovery_info if you can use the websocket API.
+        # Let's stick with /api/config for general unique info.
+        
+        # NOTE: There is no single field explicitly named "instance_id" in /api/config.
+        # A combination of system unique information is usually used.
+        # For general identification, the 'version' and 'location_name' can be useful.
+        # If you need a guaranteed UUID, you need to access a different endpoint.
+
+        # Accessing the Supervisor API directly might provide a more specific system ID.
+        # Let's try the Supervisor API's /info endpoint
+        supervisor_api_url = "http://supervisor/supervisor/info"
+        supervisor_response = requests.get(supervisor_api_url, headers=headers)
+        supervisor_response.raise_for_status()
+        supervisor_data = supervisor_response.json()
+
+        # The 'supervisor_data' contains information about the supervisor, 
+        # including a unique ID for the host/system.
+        # Look for a unique system identifier here.
+        # Based on documentation, the 'host_id' or 'system_uuid' might be the intended value.
+        system_uuid = supervisor_data.get('data', {}).get('host_id', 'Unknown ID') # Or 'system_uuid' depending on API version
+
+        return system_uuid
+
+    except requests.exceptions.RequestException as e:
+        return f"Error connecting to Home Assistant API: {e}"
+    except json.JSONDecodeError as e:
+        return f"Error decoding JSON response: {e}"
+    
 def spawn(coro):
     task = asyncio.create_task(coro)
     _live.add(task)
@@ -178,15 +231,16 @@ async def keep_idle_connection():
 async def main():
     signal.signal(signal.SIGTERM, handle_stop)
     signal.signal(signal.SIGINT, handle_stop)
+    print(f"REAL HA INSTANCE ID: {_get_ha_instance_id()}")
     print(f"HA instance ID: {HA_INSTANCE_ID}")
     print(f"Local HA: {LOCAL_HA[0]}:{LOCAL_HA[1]}")
     spawn(keep_idle_connection())
     await asyncio.Event().wait()
 
-# LOCAL_HA = discover_local_ha()
-# HA_INSTANCE_ID = get_ha_instance_id()
-LOCAL_HA = "192.168.88.117", 8123
-HA_INSTANCE_ID = "7433b6d93787482d87bbbfe937fcd369"
+LOCAL_HA = discover_local_ha()
+HA_INSTANCE_ID = get_ha_instance_id()
+# LOCAL_HA = "192.168.88.117", 8123
+# HA_INSTANCE_ID = "7433b6d93787482d87bbbfe937fcd369"
 
 
 asyncio.run(main())
