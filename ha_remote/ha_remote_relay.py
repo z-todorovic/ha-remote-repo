@@ -145,6 +145,7 @@ async def keep_idle_connection():
             print("[IDLE] Connected and identified. Waiting for data...")
             print(f"Live tasks: {len(_live)}")
 
+            first_chunk = False
             # Wait for first bytes from server/user
             while not stopping.is_set():
                 try:
@@ -153,8 +154,6 @@ async def keep_idle_connection():
                 except asyncio.TimeoutError:
                     writer.write(b'\x00')
                     await writer.drain()
-                    print("[IDLE] Waiting for data...")
-
 
             if not first_chunk or stopping.is_set():
                 writer.close()
