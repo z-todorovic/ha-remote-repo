@@ -1,6 +1,7 @@
 import contextlib
 import io
 import os
+import ssl
 import requests
 import asyncio
 import json
@@ -9,13 +10,14 @@ import signal
 import sys
 from pathlib import Path
 
-TUNNEL_HOST = os.getenv("HA_REMOTE_TUNNEL_HOST", "tunnel.cometgps.com")
-TUNNEL_PORT = os.getenv("HA_REMOTE_TUNNEL_PORT", 2345)
+TUNNEL_HOST = os.getenv("HA_REMOTE_TUNNEL_HOST", "tunnel.securicloud.me")
+TUNNEL_PORT = os.getenv("HA_REMOTE_TUNNEL_PORT", 443)
 # TUNNEL_HOST = "127.0.0.1"
 # TUNNEL_PORT = 2345
 
 stopping = asyncio.Event()
 _live = set()
+ssl_ctx = ssl.create_default_context()  
 
 def spawn(coro):
     task = asyncio.create_task(coro)
@@ -137,7 +139,12 @@ async def keep_idle_connection():
     while not stopping.is_set():
         try:
             print(f"[IDLE] Connecting to {TUNNEL_HOST}:{TUNNEL_PORT}")
-            reader, writer = await asyncio.open_connection(TUNNEL_HOST, TUNNEL_PORT)
+            reader, writer = await asyncio.open_connection(
+                TUNNEL_HOST,
+                TUNNEL_PORT,
+                ssl=ssl_ctx,
+                server_hostname=TUNNEL_HOST
+            )
             id_bytes = HA_INSTANCE_ID.encode("utf-8")
             writer.write(len(id_bytes).to_bytes(2, 'big'))
             writer.write(id_bytes)
@@ -152,7 +159,7 @@ async def keep_idle_connection():
                     first_chunk = await asyncio.wait_for(reader.readexactly(2), 5)
                     break
                 except asyncio.TimeoutError:
-                    writer.write(b'\x00')
+                    writer.write(b'\x00\x00')
                     await writer.drain()
 
             if not first_chunk or stopping.is_set():
@@ -179,10 +186,10 @@ async def main():
     spawn(keep_idle_connection())
     await asyncio.Event().wait()
 
-LOCAL_HA = discover_local_ha()
-HA_INSTANCE_ID = get_ha_instance_id()
-# LOCAL_HA = "192.168.88.117", 8123
-# HA_INSTANCE_ID = "7433b6d93787482d87bbbfe937fcd369"
+# LOCAL_HA = discover_local_ha()
+# HA_INSTANCE_ID = get_ha_instance_id()
+LOCAL_HA = "192.168.88.117", 8123
+HA_INSTANCE_ID = "3787482d87bbbfe937fcd3697433b6d9"
 
 
 asyncio.run(main())
