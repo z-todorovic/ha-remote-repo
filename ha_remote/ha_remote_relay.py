@@ -88,19 +88,23 @@ def get_ha_instance_id():
 
 class RedirectHandler(BaseHTTPRequestHandler):
     def do_GET(self):
-        # Always redirect to registration URL with this HA instance ID
         target = f"https://securicloud.me/add-agent/home_assistant/{HA_INSTANCE_ID}"
-        try:
-            self.send_response(302)
-            self.send_header("Location", target)
-            self.end_headers()
-            # Small body is optional but nice
-            self.wfile.write(
-                f"Redirecting to {target}".encode("utf-8")
-            )
-            print(f"[REDIRECT] Sent 302 to {target}")
-        except Exception as e:
-            print(f"[REDIRECT] Error handling request: {e}")
+        body = f"""
+            <html>
+                <head>
+                    <meta http-equiv="refresh" content="0; url={target}" />
+                </head>
+                <body>
+                    <p>Opening Securicloud… <a href="{target}">Click here if you are not redirected.</a></p>
+                </body>
+            </html>
+        """.encode("utf-8")
+
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
 
     # Silence default logging to stderr
     def log_message(self, format, *args):

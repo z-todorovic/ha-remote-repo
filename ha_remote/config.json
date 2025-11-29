@@ -1,6 +1,6 @@
 {
   "name": "HA Remote Relay",
-  "version": "1.3",
+  "version": "1.4",
   "slug": "ha_remote",
   "description": "Connects this Home Assistant instance to your remote tunnel server.",
   "startup": "services",
@@ -20,14 +20,6 @@
 
   "map": ["share:rw"],
   "arch": ["aarch64", "amd64", "armv7", "i386"],
-
-  "ports": {
-    "18080/tcp": null
-  },
-
-  "webui": {
-    "base": "http://127.0.0.1:18080/"
-  },
-
-  "ingress": false
+  
+  "ingress": true
 }
