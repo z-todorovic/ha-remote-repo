@@ -17,7 +17,7 @@ TUNNEL_PORT = os.getenv("HA_REMOTE_TUNNEL_PORT", 443)
 # TUNNEL_HOST = "127.0.0.1"
 # TUNNEL_PORT = 2345
 
-REDIRECT_PORT = int(os.getenv("HA_REMOTE_REDIRECT_PORT", "18080"))
+REDIRECT_PORT = int(os.getenv("INGRESS_PORT", "8099"))
 
 stopping = asyncio.Event()
 _live = set()
