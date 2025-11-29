@@ -9,7 +9,7 @@
   "homeassistant_api": true,
   "options": {
     "tunnel_host": "tunnel.securicloud.me",
-    "tunnel_port": 2345
+    "tunnel_port": 443
   },
   "schema": {
     "tunnel_host": "str",
