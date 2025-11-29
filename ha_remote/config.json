@@ -8,12 +8,8 @@
   "host_network": true,
   "homeassistant_api": true,
   "options": {
-    "tunnel_host": "tunnel.cometgps.com",
-    "tunnel_port": 2345
   },
   "schema": {
-    "tunnel_host": "str",
-    "tunnel_port": "int"
   },
   "map": ["share:rw"],
   "arch": ["aarch64", "amd64", "armv7", "i386"]
