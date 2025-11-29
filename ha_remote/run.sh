@@ -12,8 +12,7 @@ export HA_REMOTE_TUNNEL_HOST
 export HA_REMOTE_TUNNEL_PORT
 
 echo "[HA Remote] Launching Python..."
-exec python3 -u /ha_remote_relay.py & 
-exec python3 -u /ha_remote_webui.py
+exec python3 -u ha_remote_relay.py
 code=$?
 echo "[HA Remote] Python exited with code $code"
 echo "[HA Remote] Script ended."
