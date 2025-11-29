@@ -8,8 +8,8 @@
   "host_network": true,
   "homeassistant_api": true,
   "options": {
-    "tunnel_host": "tunnel.cometgps.com",
-    "tunnel_port": 2345
+    "tunnel_host": "tunnel.securicloud.me",
+    "tunnel_port": 443
   },
   "schema": {
     "tunnel_host": "str",
