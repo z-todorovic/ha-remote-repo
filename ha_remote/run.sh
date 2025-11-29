@@ -18,4 +18,3 @@ code=$?
 echo "[HA Remote] Python exited with code $code"
 echo "[HA Remote] Script ended."
 exit $code
-
