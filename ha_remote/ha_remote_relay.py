@@ -91,17 +91,17 @@ class RedirectHandler(BaseHTTPRequestHandler):
         target = f"https://securicloud.me/add-agent/home_assistant/{HA_INSTANCE_ID}"
         body = f"""
             <html>
-                <head>
-                    <meta http-equiv="refresh" content="0; url={target}" />
-                </head>
-                <body>
-                    <p>Opening Securicloud… <a href="{target}">Click here if you are not redirected.</a></p>
-                </body>
+            <head>
+                <meta http-equiv="refresh" content="0; url={target}" />
+            </head>
+            <body>
+                Redirecting to <a href="{target}">{target}</a>
+            </body>
             </html>
         """.encode("utf-8")
 
         self.send_response(200)
-        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Type", "text/html")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
