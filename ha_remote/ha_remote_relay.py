@@ -21,7 +21,12 @@ REDIRECT_PORT = int(os.getenv("INGRESS_PORT", "8099"))
 
 stopping = asyncio.Event()
 _live = set()
+
 ssl_ctx = ssl.create_default_context()
+ssl_ctx = ssl.SSLContext(ssl.PROTOCOL_TLSv1_2)
+ssl_ctx.set_ciphers('HIGH:!aNULL:!MD5')
+# ssl_ctx.check_hostname = True
+# ssl_ctx.verify_mode = ssl.CERT_REQUIRED
 
 # HTTP redirect server handle (for shutdown)
 _httpd = None
