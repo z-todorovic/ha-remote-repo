@@ -9,35 +9,58 @@ import uuid
 import signal
 import sys
 from pathlib import Path
+from http.server import BaseHTTPRequestHandler, HTTPServer
+import threading
 
 TUNNEL_HOST = os.getenv("HA_REMOTE_TUNNEL_HOST", "tunnel.securicloud.me")
 TUNNEL_PORT = os.getenv("HA_REMOTE_TUNNEL_PORT", 443)
 # TUNNEL_HOST = "127.0.0.1"
 # TUNNEL_PORT = 2345
 
+REDIRECT_PORT = int(os.getenv("HA_REMOTE_REDIRECT_PORT", "18080"))
+
 stopping = asyncio.Event()
 _live = set()
-ssl_ctx = ssl.create_default_context()  
+ssl_ctx = ssl.create_default_context()
+
+# HTTP redirect server handle (for shutdown)
+_httpd = None
+
 
 def spawn(coro):
     task = asyncio.create_task(coro)
     _live.add(task)
-    task.add_done_callback(lambda task: (_live.discard(task), print(f"Live tasks: {len(_live)}")))
+    task.add_done_callback(
+        lambda task: (
+            _live.discard(task),
+            print(f"Live tasks: {len(_live)}")
+        )
+    )
     return task
+
 
 def handle_stop(*_):
     print("Received stop signal → shutting down")
     stopping.set()
+    global _httpd
+    # Try to stop HTTP redirect server gracefully
+    if _httpd is not None:
+        with contextlib.suppress(Exception):
+            print("[REDIRECT] Shutting down redirect server")
+            _httpd.shutdown()
     # sys.exit(0)
+
 
 def discover_local_ha():
     api = os.getenv("SUPERVISOR_API")
     token = os.getenv("SUPERVISOR_TOKEN")
     if api and token:
         try:
-            r = requests.get(f"{api}/core/info",
-                             headers={"Authorization": f"Bearer {token}"},
-                             timeout=5)
+            r = requests.get(
+                f"{api}/core/info",
+                headers={"Authorization": f"Bearer {token}"},
+                timeout=5
+            )
             data = r.json().get("data", {})
             return data.get("host", "127.0.0.1"), int(data.get("port", 8123))
         except Exception as e:
@@ -45,8 +68,9 @@ def discover_local_ha():
     # fallback (Core install / Windows test)
     return "127.0.0.1", 8123
 
+
 def get_ha_instance_id():
-    cachedInstanceIdFile  = Path("/share/ha_instance_id.json")
+    cachedInstanceIdFile = Path("/share/ha_instance_id.json")
     try:
         if cachedInstanceIdFile.exists():
             try:
@@ -58,6 +82,40 @@ def get_ha_instance_id():
         return ha_id
     except Exception:
         return "test1"
+
+
+# ---------- HTTP Redirect Server ----------
+
+class RedirectHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        # Always redirect to registration URL with this HA instance ID
+        target = f"https://securicloud.me/add-agent/home_assistant/{HA_INSTANCE_ID}"
+        try:
+            self.send_response(302)
+            self.send_header("Location", target)
+            self.end_headers()
+            # Small body is optional but nice
+            self.wfile.write(
+                f"Redirecting to {target}".encode("utf-8")
+            )
+            print(f"[REDIRECT] Sent 302 to {target}")
+        except Exception as e:
+            print(f"[REDIRECT] Error handling request: {e}")
+
+    # Silence default logging to stderr
+    def log_message(self, format, *args):
+        return
+
+
+def start_redirect_server():
+    global _httpd
+    try:
+        _httpd = HTTPServer(("0.0.0.0", REDIRECT_PORT), RedirectHandler)
+        print(f"[REDIRECT] Listening on 0.0.0.0:{REDIRECT_PORT}")
+        _httpd.serve_forever()
+    except Exception as e:
+        print(f"[REDIRECT] Failed to start redirect server: {e}")
+
 
 async def pipe_tunnel_to_ha(tunnel_reader, tunnel_writer, ha_writer, first_chunk):
     try:
@@ -87,6 +145,7 @@ async def pipe_tunnel_to_ha(tunnel_reader, tunnel_writer, ha_writer, first_chunk
             except Exception:
                 pass
 
+
 async def pipe_ha_to_tunnel(ha_reader, tunnel_writer):
     try:
         while not stopping.is_set():
@@ -110,16 +169,22 @@ async def pipe_ha_to_tunnel(ha_reader, tunnel_writer):
             except Exception:
                 pass
 
+
 async def handle_active_connection(tunnel_reader, tunnel_writer, first_chunk):
     """Forward an active tunnel connection to HA."""
     try:
         print("[FORWARD] Opening HA connection...")
         ha_reader, ha_writer = await asyncio.open_connection(LOCAL_HA[0], LOCAL_HA[1])
 
-        task1 = spawn(pipe_tunnel_to_ha(tunnel_reader, tunnel_writer, ha_writer, first_chunk))
-        task2 = spawn(pipe_ha_to_tunnel(ha_reader, tunnel_writer))
-        # await asyncio.wait([task1, task2], return_when=asyncio.FIRST_COMPLETED)
-        done, pending = await asyncio.wait({task1, task2}, return_when=asyncio.FIRST_COMPLETED)
+        task1 = spawn(
+            pipe_tunnel_to_ha(tunnel_reader, tunnel_writer, ha_writer, first_chunk)
+        )
+        task2 = spawn(
+            pipe_ha_to_tunnel(ha_reader, tunnel_writer)
+        )
+        done, pending = await asyncio.wait(
+            {task1, task2}, return_when=asyncio.FIRST_COMPLETED
+        )
         for p in pending:
             p.cancel()
         await asyncio.gather(*pending, return_exceptions=True)
@@ -133,6 +198,7 @@ async def handle_active_connection(tunnel_reader, tunnel_writer, first_chunk):
             except Exception:
                 pass
         print("[FORWARD] Session closed")
+
 
 async def keep_idle_connection():
     """Maintain one idle connection, spawn new one when triggered."""
@@ -175,21 +241,27 @@ async def keep_idle_connection():
         except Exception as e:
             print(f"[IDLE] Error: {e}, retry in 3s")
             if "GeneratorExit" in str(e) or stopping.is_set():
-                break 
+                break
             await asyncio.sleep(3)
+
 
 async def main():
     signal.signal(signal.SIGTERM, handle_stop)
     signal.signal(signal.SIGINT, handle_stop)
     print(f"HA instance ID: {HA_INSTANCE_ID}")
     print(f"Local HA: {LOCAL_HA[0]}:{LOCAL_HA[1]}")
+
+    # Start the redirect server in a background thread
+    threading.Thread(target=start_redirect_server, daemon=True).start()
+
+    # Start tunnel logic
     spawn(keep_idle_connection())
     await asyncio.Event().wait()
 
-# LOCAL_HA = discover_local_ha()
-# HA_INSTANCE_ID = get_ha_instance_id()
-LOCAL_HA = "192.168.88.117", 8123
-HA_INSTANCE_ID = "3787482d87bbbfe937fcd3697433b6d9"
 
+LOCAL_HA = discover_local_ha()
+HA_INSTANCE_ID = get_ha_instance_id()
+# LOCAL_HA = "192.168.88.117", 8123
+# HA_INSTANCE_ID = "3787482d87bbbfe937fcd3697433b6d9"
 
 asyncio.run(main())
