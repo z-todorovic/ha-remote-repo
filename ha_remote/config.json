@@ -25,6 +25,9 @@
     "18080/tcp": null
   },
 
-  "webui": "http://127.0.0.1:18080/",
+  "webui": {
+    "base": "http://127.0.0.1:18080/"
+  },
+
   "ingress": false
 }
