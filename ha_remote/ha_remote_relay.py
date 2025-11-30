@@ -1,5 +1,4 @@
 import contextlib
-import io
 import os
 import ssl
 import requests
@@ -7,10 +6,7 @@ import asyncio
 import json
 import uuid
 import signal
-import sys
 from pathlib import Path
-from http.server import BaseHTTPRequestHandler, HTTPServer
-import threading
 
 TUNNEL_HOST = os.getenv("HA_REMOTE_TUNNEL_HOST", "tunnel.securicloud.me")
 TUNNEL_PORT = os.getenv("HA_REMOTE_TUNNEL_PORT", 443)
@@ -23,13 +19,6 @@ stopping = asyncio.Event()
 _live = set()
 
 ssl_ctx = ssl.create_default_context()
-ssl_ctx = ssl.SSLContext(ssl.PROTOCOL_TLSv1_2)
-ssl_ctx.set_ciphers('HIGH:!aNULL:!MD5')
-# ssl_ctx.check_hostname = True
-# ssl_ctx.verify_mode = ssl.CERT_REQUIRED
-
-# HTTP redirect server handle (for shutdown)
-_httpd = None
 
 
 def spawn(coro):
@@ -87,33 +76,6 @@ def get_ha_instance_id():
         return ha_id
     except Exception:
         return "test1"
-
-
-# ---------- HTTP Redirect Server ----------
-
-class RedirectHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        target = f"https://securicloud.me/add-agent/home_assistant/{HA_INSTANCE_ID}"
-        body = f"""
-            <html>
-            <head>
-                <meta http-equiv="refresh" content="0; url={target}" />
-            </head>
-            <body>
-                Redirecting to <a href="{target}">{target}</a>
-            </body>
-            </html>
-        """.encode("utf-8")
-
-        self.send_response(200)
-        self.send_header("Content-Type", "text/html")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
-
-    # Silence default logging to stderr
-    def log_message(self, format, *args):
-        return
 
 
 def start_redirect_server():
@@ -257,14 +219,17 @@ async def keep_idle_connection():
 async def main():
     signal.signal(signal.SIGTERM, handle_stop)
     signal.signal(signal.SIGINT, handle_stop)
+
     print(f"HA instance ID: {HA_INSTANCE_ID}")
     print(f"Local HA: {LOCAL_HA[0]}:{LOCAL_HA[1]}")
 
-    # Start the redirect server in a background thread
-    threading.Thread(target=start_redirect_server, daemon=True).start()
+    # Start ingress redirect server
+    threading.Thread(target=start_ingress_redirect_server, daemon=True).start()
 
     # Start tunnel logic
     spawn(keep_idle_connection())
+
+    # Keep running forever
     await asyncio.Event().wait()
 
 
@@ -274,3 +239,69 @@ HA_INSTANCE_ID = get_ha_instance_id()
 # HA_INSTANCE_ID = "3787482d87bbbfe937fcd3697433b6d9"
 
 asyncio.run(main())
+
+
+# ------------------------
+# INGRESS REDIRECT SERVER
+# ------------------------
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
+_httpd = None
+
+class RedirectHandler(BaseHTTPRequestHandler):
+
+    def do_GET(self):
+        # external redirect target
+        target = f"https://securicloud.me/add-agent/home_assistant/{HA_INSTANCE_ID}"
+
+        # HTML that BREAKS OUT of the Home Assistant iframe
+        body = f"""
+        <html>
+          <head>
+            <script>
+              // Escape from HA Ingress iframe and open the real secureicloud page
+              window.top.location.href = "{target}";
+            </script>
+          </head>
+          <body>
+            <p>Opening Securicloud…</p>
+            <p><a href="{target}">Click here if you are not redirected automatically.</a></p>
+          </body>
+        </html>
+        """.encode("utf-8")
+
+        try:
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            print(f"[INGRESS REDIRECT] Served HTML redirect to {target}")
+        except Exception as e:
+            print(f"[INGRESS REDIRECT] Error: {e}")
+
+    def log_message(self, *args):
+        # silence noisy HTTP logs
+        return
+
+
+def start_ingress_redirect_server():
+    """Runs the HTTP redirect server on the Home Assistant Ingress port."""
+    global _httpd
+    try:
+        port = int(os.getenv("INGRESS_PORT", "8099"))  # HA provides this
+        print(f"[INGRESS REDIRECT] Starting on port {port}")
+        _httpd = HTTPServer(("0.0.0.0", port), RedirectHandler)
+        _httpd.serve_forever()
+    except Exception as e:
+        print(f"[INGRESS REDIRECT] Failed to start: {e}")
+
+
+def stop_ingress_redirect_server():
+    """Shuts down the redirect server safely."""
+    global _httpd
+    if _httpd:
+        with contextlib.suppress(Exception):
+            print("[INGRESS REDIRECT] Shutting down")
+            _httpd.shutdown()
