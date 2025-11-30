@@ -233,14 +233,6 @@ async def main():
     await asyncio.Event().wait()
 
 
-LOCAL_HA = discover_local_ha()
-HA_INSTANCE_ID = get_ha_instance_id()
-# LOCAL_HA = "192.168.88.117", 8123
-# HA_INSTANCE_ID = "3787482d87bbbfe937fcd3697433b6d9"
-
-asyncio.run(main())
-
-
 # ------------------------
 # INGRESS REDIRECT SERVER
 # ------------------------
@@ -305,3 +297,11 @@ def stop_ingress_redirect_server():
         with contextlib.suppress(Exception):
             print("[INGRESS REDIRECT] Shutting down")
             _httpd.shutdown()
+
+
+LOCAL_HA = discover_local_ha()
+HA_INSTANCE_ID = get_ha_instance_id()
+# LOCAL_HA = "192.168.88.117", 8123
+# HA_INSTANCE_ID = "3787482d87bbbfe937fcd3697433b6d9"
+
+asyncio.run(main())
