@@ -6,6 +6,8 @@ import asyncio
 import json
 import uuid
 import signal
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
 TUNNEL_HOST = os.getenv("HA_REMOTE_TUNNEL_HOST", "tunnel.securicloud.me")
@@ -236,8 +238,6 @@ async def main():
 # ------------------------
 # INGRESS REDIRECT SERVER
 # ------------------------
-import threading
-from http.server import BaseHTTPRequestHandler, HTTPServer
 
 _httpd = None
 
@@ -253,7 +253,8 @@ class RedirectHandler(BaseHTTPRequestHandler):
           <head>
             <script>
               // Escape from HA Ingress iframe and open the real secureicloud page
-              window.top.location.href = "{target}";
+              window.top.open("{target}", "_blank");
+              window.top.location.href = "/";
             </script>
           </head>
           <body>
