@@ -238,7 +238,7 @@ async def main():
 
     debug(f"[INFO] HA instance ID: {HA_INSTANCE_ID}")
     debug(f"[INFO] Local HA: {LOCAL_HA[0]}:{LOCAL_HA[1]}")
-    log("[INFO] Instance registration URL:", regAgentUrl)
+    log(f"[INFO] Instance registration URL: {regAgentUrl}")
 
     # Start ingress redirect server
     threading.Thread(target=start_ingress_redirect_server, daemon=True).start()
