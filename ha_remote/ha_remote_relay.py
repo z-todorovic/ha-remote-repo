@@ -183,11 +183,12 @@ async def handle_active_connection(tunnel_reader, tunnel_writer, first_chunk):
         debug("[FORWARD] Session closed")
 
 
-async def keep_idle_connection():
+async def keep_idle_connection(print_conn_logs):
     """Maintain one idle connection, spawn new one when triggered."""
     while not stopping.is_set():
         try:
-            debug(f"[IDLE] Connecting to {TUNNEL_HOST}:{TUNNEL_PORT}")
+            if print_conn_logs or DEBUG:
+                log(f"[IDLE] Connecting to {TUNNEL_HOST}:{TUNNEL_PORT}")
             reader, writer = await asyncio.open_connection(
                 TUNNEL_HOST,
                 TUNNEL_PORT,
@@ -198,7 +199,9 @@ async def keep_idle_connection():
             writer.write(len(id_bytes).to_bytes(2, 'big'))
             writer.write(id_bytes)
             await writer.drain()
-            debug("[IDLE] Connected and identified. Waiting for data...")
+            if print_conn_logs or DEBUG:
+                log("[IDLE] Connected. The service is running...")
+            print_conn_logs = False
             debug(f"[INFO] Live tasks: {len(_live)}")
 
             first_chunk = False
@@ -216,13 +219,14 @@ async def keep_idle_connection():
                 await asyncio.sleep(1)
                 continue
 
-            spawn(keep_idle_connection())
+            spawn(keep_idle_connection(False))
 
             await handle_active_connection(reader, writer, first_chunk)
             break
 
         except Exception as e:
             log(f"[IDLE] Error: {e}, retry in 3s")
+            print_conn_logs = True
             if "GeneratorExit" in str(e) or stopping.is_set():
                 break
             await asyncio.sleep(3)
@@ -239,7 +243,9 @@ async def main():
     threading.Thread(target=start_ingress_redirect_server, daemon=True).start()
 
     # Start tunnel logic
-    spawn(keep_idle_connection())
+    if DEBUG:
+        print(f"[INFO] Connecting to {TUNNEL_HOST}:{TUNNEL_PORT}")
+    spawn(keep_idle_connection(True))
 
     # Keep running forever
     await asyncio.Event().wait()
