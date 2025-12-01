@@ -4,6 +4,7 @@ CONFIG_PATH=/data/options.json
 echo "[HA Remote] Starting container..."
 echo "Checking /data/options.json:"
 cat $CONFIG_PATH || echo "No options.json found!"
+echo
 
 HA_REMOTE_TUNNEL_HOST=$(jq -r '.tunnel_host' $CONFIG_PATH)
 HA_REMOTE_TUNNEL_PORT=$(jq -r '.tunnel_port' $CONFIG_PATH | tr -cd '0-9')

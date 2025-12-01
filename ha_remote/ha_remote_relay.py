@@ -236,8 +236,9 @@ async def main():
     signal.signal(signal.SIGTERM, handle_stop)
     signal.signal(signal.SIGINT, handle_stop)
 
-    log(f"HA instance ID: {HA_INSTANCE_ID}")
-    debug(f"Local HA: {LOCAL_HA[0]}:{LOCAL_HA[1]}")
+    debug(f"[INFO] HA instance ID: {HA_INSTANCE_ID}")
+    debug(f"[INFO] Local HA: {LOCAL_HA[0]}:{LOCAL_HA[1]}")
+    log("[INFO] Instance registration URL:", regAgentUrl)
 
     # Start ingress redirect server
     threading.Thread(target=start_ingress_redirect_server, daemon=True).start()
