@@ -10,6 +10,7 @@ import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
+DEBUG = os.getenv("HA_REMOTE_DEBUG", "false").lower() == "true"
 TUNNEL_HOST = os.getenv("HA_REMOTE_TUNNEL_HOST", "tunnel.securicloud.me")
 TUNNEL_PORT = os.getenv("HA_REMOTE_TUNNEL_PORT", 443)
 # TUNNEL_HOST = "127.0.0.1"
@@ -23,26 +24,35 @@ _live = set()
 ssl_ctx = ssl.create_default_context()
 
 
+def log(msg):
+    print(msg)
+
+
+def debug(msg):
+    if DEBUG:
+        print("[DEBUG]", msg)
+
+
 def spawn(coro):
     task = asyncio.create_task(coro)
     _live.add(task)
     task.add_done_callback(
         lambda task: (
             _live.discard(task),
-            print(f"Live tasks: {len(_live)}")
+            debug(f"Live tasks: {len(_live)}")
         )
     )
     return task
 
 
 def handle_stop(*_):
-    print("Received stop signal → shutting down")
+    log("Received stop signal → shutting down")
     stopping.set()
     global _httpd
     # Try to stop HTTP redirect server gracefully
     if _httpd is not None:
         with contextlib.suppress(Exception):
-            print("[REDIRECT] Shutting down redirect server")
+            log("[REDIRECT] Shutting down redirect server")
             _httpd.shutdown()
     # sys.exit(0)
 
@@ -60,7 +70,7 @@ def discover_local_ha():
             data = r.json().get("data", {})
             return data.get("host", "127.0.0.1"), int(data.get("port", 8123))
         except Exception as e:
-            print("Supervisor query failed:", e)
+            log("Supervisor query failed:", e)
     # fallback (Core install / Windows test)
     return "127.0.0.1", 8123
 
@@ -146,7 +156,7 @@ async def pipe_ha_to_tunnel(ha_reader, tunnel_writer):
 async def handle_active_connection(tunnel_reader, tunnel_writer, first_chunk):
     """Forward an active tunnel connection to HA."""
     try:
-        print("[FORWARD] Opening HA connection...")
+        debug("[FORWARD] Opening HA connection...")
         ha_reader, ha_writer = await asyncio.open_connection(LOCAL_HA[0], LOCAL_HA[1])
 
         task1 = spawn(
@@ -162,7 +172,7 @@ async def handle_active_connection(tunnel_reader, tunnel_writer, first_chunk):
             p.cancel()
         await asyncio.gather(*pending, return_exceptions=True)
     except Exception as e:
-        print(f"[ERROR] {e}")
+        log(f"[FORWARD] Error: {e}")
     finally:
         for w in (tunnel_writer, ha_writer):
             try:
@@ -170,14 +180,14 @@ async def handle_active_connection(tunnel_reader, tunnel_writer, first_chunk):
                 await w.wait_closed()
             except Exception:
                 pass
-        print("[FORWARD] Session closed")
+        debug("[FORWARD] Session closed")
 
 
 async def keep_idle_connection():
     """Maintain one idle connection, spawn new one when triggered."""
     while not stopping.is_set():
         try:
-            print(f"[IDLE] Connecting to {TUNNEL_HOST}:{TUNNEL_PORT}")
+            debug(f"[IDLE] Connecting to {TUNNEL_HOST}:{TUNNEL_PORT}")
             reader, writer = await asyncio.open_connection(
                 TUNNEL_HOST,
                 TUNNEL_PORT,
@@ -188,8 +198,8 @@ async def keep_idle_connection():
             writer.write(len(id_bytes).to_bytes(2, 'big'))
             writer.write(id_bytes)
             await writer.drain()
-            print("[IDLE] Connected and identified. Waiting for data...")
-            print(f"Live tasks: {len(_live)}")
+            debug("[IDLE] Connected and identified. Waiting for data...")
+            debug(f"[INFO] Live tasks: {len(_live)}")
 
             first_chunk = False
             # Wait for first bytes from server/user
@@ -212,7 +222,7 @@ async def keep_idle_connection():
             break
 
         except Exception as e:
-            print(f"[IDLE] Error: {e}, retry in 3s")
+            log(f"[IDLE] Error: {e}, retry in 3s")
             if "GeneratorExit" in str(e) or stopping.is_set():
                 break
             await asyncio.sleep(3)
@@ -222,8 +232,8 @@ async def main():
     signal.signal(signal.SIGTERM, handle_stop)
     signal.signal(signal.SIGINT, handle_stop)
 
-    print(f"HA instance ID: {HA_INSTANCE_ID}")
-    print(f"Local HA: {LOCAL_HA[0]}:{LOCAL_HA[1]}")
+    log(f"HA instance ID: {HA_INSTANCE_ID}")
+    debug(f"Local HA: {LOCAL_HA[0]}:{LOCAL_HA[1]}")
 
     # Start ingress redirect server
     threading.Thread(target=start_ingress_redirect_server, daemon=True).start()
@@ -244,22 +254,17 @@ _httpd = None
 class RedirectHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
-        # external redirect target
-        target = f"https://securicloud.me/add-agent/home_assistant/{HA_INSTANCE_ID}"
-
         # HTML that BREAKS OUT of the Home Assistant iframe
         body = f"""
         <html>
           <head>
             <script>
-              // Escape from HA Ingress iframe and open the real secureicloud page
-              window.top.open("{target}", "_blank");
-              window.top.location.href = "/";
+              window.top.open("{regAgentUrl}", "_blank");
             </script>
           </head>
           <body>
             <p>Opening Securicloud…</p>
-            <p><a href="{target}">Click here if you are not redirected automatically.</a></p>
+            <p><a href="{regAgentUrl}">Click here if you are not redirected automatically.</a></p>
           </body>
         </html>
         """.encode("utf-8")
@@ -270,9 +275,9 @@ class RedirectHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
-            print(f"[INGRESS REDIRECT] Served HTML redirect to {target}")
+            debug(f"[INGRESS REDIRECT] Served HTML redirect to {regAgentUrl}")
         except Exception as e:
-            print(f"[INGRESS REDIRECT] Error: {e}")
+            log(f"[INGRESS REDIRECT] Error: {e}")
 
     def log_message(self, *args):
         # silence noisy HTTP logs
@@ -284,11 +289,11 @@ def start_ingress_redirect_server():
     global _httpd
     try:
         port = int(os.getenv("INGRESS_PORT", "8099"))  # HA provides this
-        print(f"[INGRESS REDIRECT] Starting on port {port}")
+        debug(f"[INGRESS REDIRECT] Starting on port {port}")
         _httpd = HTTPServer(("0.0.0.0", port), RedirectHandler)
         _httpd.serve_forever()
     except Exception as e:
-        print(f"[INGRESS REDIRECT] Failed to start: {e}")
+        log(f"[INGRESS REDIRECT] Failed to start: {e}")
 
 
 def stop_ingress_redirect_server():
@@ -296,12 +301,13 @@ def stop_ingress_redirect_server():
     global _httpd
     if _httpd:
         with contextlib.suppress(Exception):
-            print("[INGRESS REDIRECT] Shutting down")
+            log("[INGRESS REDIRECT] Shutting down")
             _httpd.shutdown()
 
 
 LOCAL_HA = discover_local_ha()
 HA_INSTANCE_ID = get_ha_instance_id()
+regAgentUrl = f"https://securicloud.me/add-agent/home_assistant/{HA_INSTANCE_ID}"
 # LOCAL_HA = "192.168.88.117", 8123
 # HA_INSTANCE_ID = "3787482d87bbbfe937fcd3697433b6d9"
 

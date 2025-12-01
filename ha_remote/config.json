@@ -10,12 +10,14 @@
 
   "options": {
     "tunnel_host": "tunnel.securicloud.me",
-    "tunnel_port": 443
+    "tunnel_port": 443,
+    "debug": false
   },
 
   "schema": {
     "tunnel_host": "str",
-    "tunnel_port": "int"
+    "tunnel_port": "int",
+    "debug": "bool"
   },
 
   "map": ["share:rw"],

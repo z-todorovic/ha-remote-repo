@@ -7,9 +7,11 @@ cat $CONFIG_PATH || echo "No options.json found!"
 
 HA_REMOTE_TUNNEL_HOST=$(jq -r '.tunnel_host' $CONFIG_PATH)
 HA_REMOTE_TUNNEL_PORT=$(jq -r '.tunnel_port' $CONFIG_PATH | tr -cd '0-9')
+HA_REMOTE_DEBUG=$(jq -r '.debug' $CONFIG_PATH)
 
 export HA_REMOTE_TUNNEL_HOST
 export HA_REMOTE_TUNNEL_PORT
+export HA_REMOTE_DEBUG
 
 echo "[HA Remote] Launching Python..."
 exec python3 -u ha_remote_relay.py
