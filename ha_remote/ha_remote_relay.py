@@ -94,10 +94,10 @@ def start_redirect_server():
     global _httpd
     try:
         _httpd = HTTPServer(("0.0.0.0", REDIRECT_PORT), RedirectHandler)
-        print(f"[REDIRECT] Listening on 0.0.0.0:{REDIRECT_PORT}")
+        log(f"[REDIRECT] Listening on 0.0.0.0:{REDIRECT_PORT}")
         _httpd.serve_forever()
     except Exception as e:
-        print(f"[REDIRECT] Failed to start redirect server: {e}")
+        log(f"[REDIRECT] Failed to start redirect server: {e}")
 
 
 async def pipe_tunnel_to_ha(tunnel_reader, tunnel_writer, ha_writer, first_chunk):
@@ -244,8 +244,6 @@ async def main():
     threading.Thread(target=start_ingress_redirect_server, daemon=True).start()
 
     # Start tunnel logic
-    if DEBUG:
-        print(f"[INFO] Connecting to {TUNNEL_HOST}:{TUNNEL_PORT}")
     spawn(keep_idle_connection(True))
 
     # Keep running forever
