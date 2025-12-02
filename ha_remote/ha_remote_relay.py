@@ -1,10 +1,10 @@
 import contextlib
 import os
+import secrets
 import ssl
 import requests
 import asyncio
 import json
-import uuid
 import signal
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -83,7 +83,8 @@ def get_ha_instance_id():
                 return json.loads(cachedInstanceIdFile.read_text())["instance_id"]
             except Exception:
                 pass
-        ha_id = uuid.uuid4().hex
+        base62 = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+        ha_id = ''.join(secrets.choice(base62) for _ in range(22))
         cachedInstanceIdFile.write_text(json.dumps({"instance_id": ha_id}))
         return ha_id
     except Exception:
