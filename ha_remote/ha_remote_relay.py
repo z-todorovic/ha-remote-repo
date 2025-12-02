@@ -83,8 +83,8 @@ def get_ha_instance_id():
                 return json.loads(cachedInstanceIdFile.read_text())["instance_id"]
             except Exception:
                 pass
-        base62 = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
-        ha_id = ''.join(secrets.choice(base62) for _ in range(22))
+        base36 = "0123456789abcdefghijklmnopqrstuvwxyz"
+        ha_id = ''.join(secrets.choice(base36) for _ in range(25))
         cachedInstanceIdFile.write_text(json.dumps({"instance_id": ha_id}))
         return ha_id
     except Exception:
