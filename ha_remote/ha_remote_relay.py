@@ -11,8 +11,8 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
 DEBUG = os.getenv("HA_REMOTE_DEBUG", "false").lower() == "true"
-TUNNEL_HOST = os.getenv("HA_REMOTE_TUNNEL_HOST", "tunnel.securicloud.me")
-TUNNEL_PORT = os.getenv("HA_REMOTE_TUNNEL_PORT", 443)
+TUNNEL_HOST = os.getenv("HA_REMOTE_TUNNEL_HOST", "securicloud.me")
+TUNNEL_PORT = os.getenv("HA_REMOTE_TUNNEL_PORT", 5001)
 # TUNNEL_HOST = "127.0.0.1"
 # TUNNEL_PORT = 2345
 
