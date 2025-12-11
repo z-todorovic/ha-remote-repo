@@ -9,8 +9,8 @@
   "homeassistant_api": true,
 
   "options": {
-    "tunnel_host": "tunnel.securicloud.me",
-    "tunnel_port": 443,
+    "tunnel_host": "securicloud.me",
+    "tunnel_port": 5001,
     "debug": false
   },
 
