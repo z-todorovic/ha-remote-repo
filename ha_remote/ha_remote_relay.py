@@ -308,10 +308,6 @@ class RedirectHandler(BaseHTTPRequestHandler):
       <label class="fw-semibold mb-1">Instance ID</label>
       <div class="input-group mb-3">
         <input type="text" class="form-control" readonly value="{HA_INSTANCE_ID}">
-        <button class="btn btn-outline-secondary"
-                onclick="navigator.clipboard.writeText('{HA_INSTANCE_ID}')">
-          Copy
-        </button>
       </div>
 
       <div class="alert alert-info small">
