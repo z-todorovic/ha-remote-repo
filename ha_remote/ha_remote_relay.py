@@ -15,7 +15,7 @@ DEBUG = os.getenv("HA_REMOTE_DEBUG", "false").lower() == "true"
 TUNNEL_HOST = os.getenv("HA_REMOTE_TUNNEL_HOST", "securicloud.me")
 TUNNEL_PORT = os.getenv("HA_REMOTE_TUNNEL_PORT", 5001)
 
-REDIRECT_PORT = 8099  # HA Ingress forwards here inside the container
+REDIRECT_PORT = 8099  # ingress will forward to this
 
 stopping = asyncio.Event()
 _live = set()
@@ -25,7 +25,7 @@ ssl_ctx = ssl.create_default_context()
 
 
 # -----------------------------------------------------------------------------
-# LOGGING
+# LOGGING UTILITIES
 # -----------------------------------------------------------------------------
 
 def log(msg: str):
@@ -41,11 +41,11 @@ def debug(msg: str):
 # -----------------------------------------------------------------------------
 
 def restart_addon():
-    """Triggers Supervisor to restart this add-on after returning HTMX response."""
+    """Triggers Supervisor-managed restart AFTER the reset UI is shown."""
     try:
         token = os.getenv("SUPERVISOR_TOKEN")
         if not token:
-            log("[RESTART] No supervisor token found!")
+            log("[RESTART] No supervisor token!")
             return
 
         url = "http://supervisor/addons/self/restart"
@@ -54,14 +54,14 @@ def restart_addon():
         if r.status_code == 200:
             log("[RESTART] Add-on restart triggered.")
         else:
-            log(f"[RESTART] Supervisor restart failed: {r.status_code} {r.text}")
+            log(f"[RESTART] Failure: {r.status_code} {r.text}")
 
     except Exception as e:
-        log(f"[RESTART] Exception during restart: {e}")
+        log(f"[RESTART] Exception: {e}")
 
 
 # -----------------------------------------------------------------------------
-# INTERNAL UTILITIES
+# ASYNC UTIL
 # -----------------------------------------------------------------------------
 
 def spawn(coro):
@@ -71,6 +71,10 @@ def spawn(coro):
     return task
 
 
+# -----------------------------------------------------------------------------
+# SIGNAL HANDLING
+# -----------------------------------------------------------------------------
+
 def handle_stop(*_):
     log("Received stop signal → shutting down")
     stopping.set()
@@ -78,7 +82,7 @@ def handle_stop(*_):
 
 
 # -----------------------------------------------------------------------------
-# HOME ASSISTANT DISCOVERY
+# DISCOVER HOME ASSISTANT
 # -----------------------------------------------------------------------------
 
 def discover_local_ha():
@@ -92,58 +96,58 @@ def discover_local_ha():
                 headers={"Authorization": f"Bearer {token}"},
                 timeout=5
             )
-            data = r.json().get("data", {})
-            return data.get("host", "127.0.0.1"), int(data.get("port", 8123))
+            d = r.json().get("data", {})
+            return d.get("host", "127.0.0.1"), int(d.get("port", 8123))
         except Exception as e:
-            log(f"Supervisor query failed: {e}")
+            log(f"Supervisor lookup failed: {e}")
 
     return "127.0.0.1", 8123
 
 
 # -----------------------------------------------------------------------------
-# INSTANCE ID
+# INSTANCE ID FILE
 # -----------------------------------------------------------------------------
 
 def get_ha_instance_id():
-    cached_file = Path("/share/ha_instance_id.json")
+    path = Path("/share/ha_instance_id.json")
     try:
-        if cached_file.exists():
+        if path.exists():
             try:
-                return json.loads(cached_file.read_text())["instance_id"]
+                return json.loads(path.read_text())["instance_id"]
             except Exception:
                 pass
 
-        # Generate new ID on startup if missing
+        # generate 25-char base36 ID
         base36 = "0123456789abcdefghijklmnopqrstuvwxyz"
-        ha_id = ''.join(secrets.choice(base36) for _ in range(25))
-        cached_file.write_text(json.dumps({"instance_id": ha_id}))
-        return ha_id
+        new_id = ''.join(secrets.choice(base36) for _ in range(25))
+        path.write_text(json.dumps({"instance_id": new_id}))
+        return new_id
 
     except Exception:
         return "test1"
 
 
 # -----------------------------------------------------------------------------
-# TUNNEL LOGIC  (unchanged from previous working version)
+# TUNNEL CODE (unchanged)
 # -----------------------------------------------------------------------------
 
-async def pipe_tunnel_to_ha(tunnel_reader, tunnel_writer, ha_writer, first_chunk):
+async def pipe_tunnel_to_ha(t_reader, t_writer, ha_writer, first_chunk):
     try:
         length = int.from_bytes(first_chunk)
         while not stopping.is_set():
             if length > 0:
-                data = await tunnel_reader.readexactly(length)
-                ha_writer.write(data)
+                d = await t_reader.readexactly(length)
+                ha_writer.write(d)
                 await ha_writer.drain()
 
             while not stopping.is_set():
                 try:
-                    b = await asyncio.wait_for(tunnel_reader.readexactly(2), 5)
+                    b = await asyncio.wait_for(t_reader.readexactly(2), 5)
                     length = int.from_bytes(b)
                     break
                 except asyncio.TimeoutError:
-                    tunnel_writer.write(b"\x00\x00")
-                    await tunnel_writer.drain()
+                    t_writer.write(b"\x00\x00")
+                    await t_writer.drain()
 
     except asyncio.CancelledError:
         pass
@@ -157,15 +161,15 @@ async def pipe_tunnel_to_ha(tunnel_reader, tunnel_writer, ha_writer, first_chunk
                 await ha_writer.wait_closed()
 
 
-async def pipe_ha_to_tunnel(ha_reader, tunnel_writer):
+async def pipe_ha_to_tunnel(ha_reader, t_writer):
     try:
         while not stopping.is_set():
-            data = await ha_reader.read(8192)
-            if not data:
+            d = await ha_reader.read(8192)
+            if not d:
                 break
-            tunnel_writer.write(len(data).to_bytes(2, "big"))
-            tunnel_writer.write(data)
-            await tunnel_writer.drain()
+            t_writer.write(len(d).to_bytes(2, "big"))
+            t_writer.write(d)
+            await t_writer.drain()
 
     except asyncio.CancelledError:
         pass
@@ -173,24 +177,23 @@ async def pipe_ha_to_tunnel(ha_reader, tunnel_writer):
         pass
 
     finally:
-        if not tunnel_writer.is_closing():
-            tunnel_writer.close()
+        if not t_writer.is_closing():
+            t_writer.close()
             with contextlib.suppress(Exception):
-                await tunnel_writer.wait_closed()
+                await t_writer.wait_closed()
 
 
-async def handle_active_connection(tunnel_reader, tunnel_writer, first_chunk):
+async def handle_active_connection(t_reader, t_writer, first_chunk):
     ha_reader = ha_writer = None
 
     try:
-        debug("[FORWARD] Opening HA connection...")
+        debug("[FORWARD] Opening HA connection…")
         ha_reader, ha_writer = await asyncio.open_connection(LOCAL_HA[0], LOCAL_HA[1])
 
-        t1 = spawn(pipe_tunnel_to_ha(tunnel_reader, tunnel_writer, ha_writer, first_chunk))
-        t2 = spawn(pipe_ha_to_tunnel(ha_reader, tunnel_writer))
+        t1 = spawn(pipe_tunnel_to_ha(t_reader, t_writer, ha_writer, first_chunk))
+        t2 = spawn(pipe_ha_to_tunnel(ha_reader, t_writer))
 
         done, pending = await asyncio.wait({t1, t2}, return_when=asyncio.FIRST_COMPLETED)
-
         for p in pending:
             p.cancel()
         await asyncio.gather(*pending, return_exceptions=True)
@@ -199,7 +202,7 @@ async def handle_active_connection(tunnel_reader, tunnel_writer, first_chunk):
         log(f"[FORWARD] Error: {e}")
 
     finally:
-        for w in (tunnel_writer, ha_writer):
+        for w in (t_writer, ha_writer):
             if w:
                 with contextlib.suppress(Exception):
                     w.close()
@@ -214,62 +217,68 @@ async def keep_idle_connection(print_conn_logs):
             if print_conn_logs or DEBUG:
                 log(f"[IDLE] Connecting to {TUNNEL_HOST}:{TUNNEL_PORT}")
 
-            reader, writer = await asyncio.open_connection(
+            r, w = await asyncio.open_connection(
                 TUNNEL_HOST,
                 int(TUNNEL_PORT),
                 ssl=ssl_ctx,
                 server_hostname=TUNNEL_HOST
             )
 
-            id_bytes = HA_INSTANCE_ID.encode()
-            writer.write(len(id_bytes).to_bytes(2, "big"))
-            writer.write(id_bytes)
-            await writer.drain()
+            ident = HA_INSTANCE_ID.encode()
+            w.write(len(ident).to_bytes(2, "big"))
+            w.write(ident)
+            await w.drain()
 
             if print_conn_logs or DEBUG:
-                log("[IDLE] Connected. The service is running...")
+                log("[IDLE] Connected. The service is running…")
             print_conn_logs = False
 
-            # Waiting for first two bytes to activate forwarding
             while not stopping.is_set():
                 try:
-                    first_chunk = await asyncio.wait_for(reader.readexactly(2), 5)
+                    first_chunk = await asyncio.wait_for(r.readexactly(2), 5)
                     break
                 except asyncio.TimeoutError:
-                    writer.write(b"\x00\x00")
-                    await writer.drain()
+                    w.write(b"\x00\x00")
+                    await w.drain()
 
             if not first_chunk or stopping.is_set():
-                writer.close()
+                w.close()
                 await asyncio.sleep(1)
                 continue
 
             spawn(keep_idle_connection(False))
-            await handle_active_connection(reader, writer, first_chunk)
+            await handle_active_connection(r, w, first_chunk)
             break
 
         except Exception as e:
-            log(f"[IDLE] Error: {e}, retry in 3s")
+            log(f"[IDLE] Error: {e}, retrying in 3s")
             print_conn_logs = True
             await asyncio.sleep(3)
 
 
 # -----------------------------------------------------------------------------
-# INGRESS UI  (HTMX + confirmation + restart polling)
+# INGRESS UI (polished)
 # -----------------------------------------------------------------------------
 
 class RedirectHandler(BaseHTTPRequestHandler):
-    """
-    Routes:
-      /                   → main web UI
-      /reset-confirm      → full-page confirmation dialog
-      /reset-now          → delete ID, show restart page, trigger restart
-      /check-ready        → HTMX poller, returns main UI once ID is back
-    """
 
-    # MAIN PAGE ---------------------------------------------------
+    # FULL POLISHED MAIN PAGE -------------------------------------------------
 
-    def build_main_page(self) -> str:
+    def build_main_page(self, reset_success=False) -> str:
+        toast = ""
+        if reset_success:
+            toast = """
+            <div aria-live="polite" aria-atomic="true" class="position-relative" style="z-index:9999;">
+              <div class="toast-container position-fixed top-0 end-0 p-3">
+                <div class="toast text-bg-success show shadow-sm border-0">
+                  <div class="toast-body">
+                    ✓ Instance ID successfully regenerated
+                  </div>
+                </div>
+              </div>
+            </div>
+            """
+
         return f"""<!DOCTYPE html>
 <html>
 <head>
@@ -281,39 +290,56 @@ class RedirectHandler(BaseHTTPRequestHandler):
 </head>
 <body>
 
-<div class="container" style="max-width:600px; margin-top:40px;">
+{toast}
 
-  <h3 class="mb-3">HA Remote Relay</h3>
+<div class="container" style="max-width:650px; margin-top:40px;">
 
-  <div class="alert alert-secondary">
-    <b>Instance ID:</b><br>
-    <code>{HA_INSTANCE_ID}</code>
+  <div class="card shadow-sm">
+    <div class="card-header bg-primary text-white">
+      <h4 class="mb-0">HA Remote Relay</h4>
+    </div>
+
+    <div class="card-body">
+
+      <p class="text-muted mb-4">
+        Manage your Securicloud remote-access link for this Home Assistant instance.
+      </p>
+
+      <label class="fw-semibold mb-1">Instance ID</label>
+      <div class="input-group mb-3">
+        <input type="text" class="form-control" readonly value="{HA_INSTANCE_ID}">
+        <button class="btn btn-outline-secondary"
+                onclick="navigator.clipboard.writeText('{HA_INSTANCE_ID}')">
+          Copy
+        </button>
+      </div>
+
+      <div class="alert alert-info small">
+        If you need to re-register this installation with Securicloud,
+        generate a new Instance ID.
+      </div>
+
+      <button class="btn btn-danger w-100 mb-3"
+              hx-get="reset-confirm"
+              hx-target="body"
+              hx-swap="innerHTML">
+        Generate New Instance ID
+      </button>
+
+      <button class="btn btn-success w-100"
+              onclick="window.top.open('{regAgentUrl}', '_blank')">
+        Register Instance
+      </button>
+
+    </div>
   </div>
-
-  <div class="alert alert-info">
-    Use <b>Generate New Instance ID</b> if you need to re-register
-    this Home Assistant instance with Securicloud.
-  </div>
-
-  <button class="btn btn-danger w-100 mb-3"
-          hx-get="reset-confirm"
-          hx-target="body"
-          hx-swap="innerHTML">
-      Generate New Instance ID
-  </button>
-
-  <button class="btn btn-primary w-100"
-          onclick="window.top.open('{regAgentUrl}', '_blank')">
-      Register Instance
-  </button>
-
 </div>
 
 </body>
 </html>
 """
 
-    # CONFIRMATION ---------------------------------------------------
+    # CONFIRMATION PAGE -------------------------------------------------------
 
     def build_confirm_page(self) -> str:
         return """<!DOCTYPE html>
@@ -327,21 +353,22 @@ class RedirectHandler(BaseHTTPRequestHandler):
 </head>
 <body>
 
-<div class="container" style="max-width:600px; margin-top:60px;">
-
-  <div class="card border-warning">
-    <div class="card-header bg-warning">Confirm Instance ID Reset</div>
+<div class="container" style="max-width:650px; margin-top:60px;">
+  <div class="card border-warning shadow-sm">
+    <div class="card-header bg-warning">
+      <strong>Confirm Instance ID Reset</strong>
+    </div>
 
     <div class="card-body">
       <p>
-        This will <b>reset the instance ID</b> for this Home Assistant instance.
-        A new ID will be generated after restart.
+        This will <b>reset the instance ID</b> for this Home Assistant
+        installation. A new ID will be generated after restart.
       </p>
       <p class="text-danger">
-        Existing remote access sessions using the old ID will stop working.
+        Existing Securicloud remote access sessions will stop working.
       </p>
 
-      <div class="d-flex justify-content-between mt-4">
+      <div class="d-flex justify-content-between">
         <button class="btn btn-secondary"
                 hx-get="."
                 hx-target="body"
@@ -358,14 +385,13 @@ class RedirectHandler(BaseHTTPRequestHandler):
       </div>
     </div>
   </div>
-
 </div>
 
 </body>
 </html>
 """
 
-    # RESET + AUTO-RESTART PAGE ------------------------------------
+    # RESET PAGE WITH AUTO-REFRESH -------------------------------------------
 
     def build_reset_done_page(self) -> str:
         return """<!DOCTYPE html>
@@ -380,48 +406,46 @@ class RedirectHandler(BaseHTTPRequestHandler):
 <body>
 
 <script>
+// Poll the same Ingress URL until the addon is alive again
 async function checkAlive() {
     try {
-        // Try to load the addon root (the same URL we are viewing)
-        const r = await fetch(window.location.href, { method: "GET" });
-
-        // When addon is back, this succeeds with status 200
+        const r = await fetch(window.location.href, { cache: "no-store" });
         if (r.ok) {
-            window.location.reload();
+            // Go to main page with success toast
+            window.location.href = window.location.pathname + "?reset_success=1";
         }
-
     } catch (e) {
-        // ignore — addon is still restarting
+        // ignore — addon still restarting
     }
 }
-
-// Try every 3 seconds
 setInterval(checkAlive, 3000);
 </script>
 
-<div class="container" style="max-width:600px; margin-top:60px;">
-
-  <div class="alert alert-warning text-center">
+<div class="container" style="max-width:650px; margin-top:60px;">
+  <div class="alert alert-warning text-center shadow-sm">
     <h4>Instance ID Reset</h4>
-    <p>The instance ID has been removed.</p>
+    <p>The instance ID file has been removed.</p>
     <p>A new one will be created when the add-on restarts.</p>
     <hr>
     <p>The add-on is restarting…<br>
-       This page will refresh automatically when it becomes available.</p>
+       This page will refresh automatically.</p>
   </div>
-
 </div>
 
 </body>
 </html>
 """
 
-    # ROUTER -------------------------------------------------------
+    # -------------------------------------------------------------------------
+    # ROUTING
+    # -------------------------------------------------------------------------
 
     def do_GET(self):
-        debug(f"[INGRESS] Raw path: {self.path}")
         parsed = urllib.parse.urlparse(self.path)
         clean = parsed.path.rstrip("/")
+        query = urllib.parse.parse_qs(parsed.query or "")
+
+        reset_success = "reset_success" in query
 
         if clean.endswith("reset-confirm"):
             return self.respond_html(self.build_confirm_page())
@@ -430,12 +454,12 @@ setInterval(checkAlive, 3000);
             return self.handle_reset_now()
 
         if clean.endswith("check-ready"):
-            return self.handle_check_ready()
+            return self.respond_html(self.build_reset_done_page())
 
-        # default = main page
-        return self.respond_html(self.build_main_page())
+        # MAIN PAGE
+        return self.respond_html(self.build_main_page(reset_success))
 
-    # RESPONSE WRAPPER ---------------------------------------------
+    # -------------------------------------------------------------------------
 
     def respond_html(self, html: str):
         body = html.encode()
@@ -445,42 +469,26 @@ setInterval(checkAlive, 3000);
         self.end_headers()
         self.wfile.write(body)
 
-    # ----------------------------------------------------------------
-    # HANDLERS
-    # ----------------------------------------------------------------
+    # -------------------------------------------------------------------------
 
     def handle_reset_now(self):
-        """Delete ID file → show restart page → trigger restart."""
-
+        """Delete ID file, show restart page, trigger restart."""
         try:
-            cached = Path("/share/ha_instance_id.json")
-            if cached.exists():
-                cached.unlink()
+            p = Path("/share/ha_instance_id.json")
+            if p.exists():
+                p.unlink()
             log("[RESET] Instance ID file deleted.")
         except Exception as e:
-            log(f"[RESET] Error deleting ID: {e}")
+            log(f"[RESET] Error deleting file: {e}")
 
-        # First send page
+        # Show restart UI first
         self.respond_html(self.build_reset_done_page())
 
-        # Then restart asynchronously
+        # Restart in background
         threading.Thread(target=restart_addon, daemon=True).start()
 
-    def handle_check_ready(self):
-        """HTMX polling: return main UI when add-on has restarted."""
-
-        # If ID file exists → restart is done
-        if Path("/share/ha_instance_id.json").exists():
-            new_id = get_ha_instance_id()  # refresh global
-            global HA_INSTANCE_ID
-            HA_INSTANCE_ID = new_id
-            return self.respond_html(self.build_main_page())
-
-        # Still restarting → return same page
-        return self.respond_html(self.build_reset_done_page())
-
     def log_message(self, *args):
-        return  # silence BaseHTTPRequestHandler noise
+        return  # silence HTTP logs
 
 
 # -----------------------------------------------------------------------------
@@ -490,12 +498,13 @@ setInterval(checkAlive, 3000);
 def start_ingress_redirect_server():
     global _httpd
     try:
-        log(f"[INGRESS] Starting admin UI on port {REDIRECT_PORT}")
+        log(f"[INGRESS] Starting admin UI on {REDIRECT_PORT}")
         _httpd = HTTPServer(("0.0.0.0", REDIRECT_PORT), RedirectHandler)
-        log("[INGRESS] Admin UI ready")
+        log("[INGRESS] Ready")
         _httpd.serve_forever()
     except Exception as e:
         log(f"[INGRESS] Failed to start admin UI: {e}")
+
 
 def stop_ingress_redirect_server():
     global _httpd
@@ -506,7 +515,7 @@ def stop_ingress_redirect_server():
 
 
 # -----------------------------------------------------------------------------
-# MAIN ASYNC
+# MAIN ASYNC ENTRY
 # -----------------------------------------------------------------------------
 
 async def main():
@@ -517,6 +526,7 @@ async def main():
 
     threading.Thread(target=start_ingress_redirect_server, daemon=True).start()
     spawn(keep_idle_connection(True))
+
     await asyncio.Event().wait()
 
 
