@@ -301,18 +301,18 @@ class RedirectHandler(BaseHTTPRequestHandler):
 
     <div class="card-body">
 
-      <p class="text-muted mb-4">
-        Manage your Securicloud remote-access link for this Home Assistant instance.
-      </p>
-
       <label class="fw-semibold mb-1">Instance ID</label>
       <div class="input-group mb-3">
         <input type="text" class="form-control" readonly value="{HA_INSTANCE_ID}">
       </div>
 
+      <button class="btn btn-success w-100" onclick="window.top.open('{regAgentUrl}', '_blank')">
+        Register Instance
+      </button>
+
       <div class="alert alert-info small">
-        If you need to re-register this installation with Securicloud,
-        generate a new Instance ID.
+        Generate a new Instance ID if you need to invalidate current Home Assistant 
+        installation Instance ID and all its acces tokens.
       </div>
 
       <button class="btn btn-danger w-100 mb-3"
@@ -320,11 +320,6 @@ class RedirectHandler(BaseHTTPRequestHandler):
               hx-target="body"
               hx-swap="innerHTML">
         Generate New Instance ID
-      </button>
-
-      <button class="btn btn-success w-100"
-              onclick="window.top.open('{regAgentUrl}', '_blank')">
-        Register Instance
       </button>
 
     </div>
@@ -361,7 +356,8 @@ class RedirectHandler(BaseHTTPRequestHandler):
         installation. A new ID will be generated after restart.
       </p>
       <p class="text-danger">
-        Existing Securicloud remote access sessions will stop working.
+        Existing Securicloud remote access sessions will stop working and all 
+        access tokens currently linked to this Home Assistant installation will be invalidated.
       </p>
 
       <div class="d-flex justify-content-between">
