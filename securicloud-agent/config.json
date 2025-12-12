@@ -1,0 +1,26 @@
+{
+  "name": "Securicloud Agent for Home Assistant",
+  "version": "1.0",
+  "slug": "securicloud_agent",
+  "description": "Zero-configuration, secure remote access agent for Home Assistant. Establishes an outbound encrypted connection to Securicloud without port forwarding or firewall changes.",
+  "panel_icon": "mdi:cloud-lock",
+  "startup": "services",
+  "boot": "auto",
+  "host_network": true,
+  "homeassistant_api": true,
+
+  "options": {
+    "debug": false
+  },
+
+  "schema": {
+    "debug": "bool"
+  },
+
+  "map": ["share:rw"],
+  "arch": ["aarch64", "amd64", "armv7", "i386"],
+
+  "ingress": true,
+  "ingress_port": 8099,
+  "ingress_stream": false
+}
