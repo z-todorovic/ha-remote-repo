@@ -264,62 +264,59 @@ class RedirectHandler(BaseHTTPRequestHandler):
 
     # FULL POLISHED MAIN PAGE -------------------------------------------------
 
-    def build_main_page(self, reset_success=False) -> str:
-        toast = ""
-        if reset_success:
-            toast = """
-            <div aria-live="polite" aria-atomic="true" class="position-relative" style="z-index:9999;">
-              <div class="toast-container position-fixed top-0 end-0 p-3">
-                <div class="toast text-bg-success show shadow-sm border-0">
-                  <div class="toast-body">
-                    ✓ Instance ID successfully regenerated
-                  </div>
-                </div>
-              </div>
-            </div>
-            """
-
+    def build_main_page(self) -> str:
         return f"""<!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8">
-<title>HA Remote Relay</title>
+<title>Securicloud Agent</title>
 <link rel="stylesheet"
  href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css">
 <script src="https://unpkg.com/htmx.org@1.9.10"></script>
 </head>
 <body>
 
-{toast}
-
 <div class="container" style="max-width:650px; margin-top:40px;">
 
   <div class="card shadow-sm">
     <div class="card-header bg-primary text-white">
-      <h4 class="mb-0">HA Remote Relay</h4>
+      <h4 class="mb-0">Securicloud Agent for Home Assistant</h4>
     </div>
 
     <div class="card-body">
+
+      <p class="text-muted mb-4">
+        Manage your Securicloud remote-access for this Home Assistant instance.
+      </p>
 
       <label class="fw-semibold mb-1">Instance ID</label>
       <div class="input-group mb-3">
         <input type="text" class="form-control" readonly value="{HA_INSTANCE_ID}">
       </div>
 
-      <button class="btn btn-success w-100" onclick="window.top.open('{regAgentUrl}', '_blank')">
-        Register Instance
+      <button class="btn btn-success w-100 mb-3"
+              onclick="window.top.open('{regAgentUrl}', '_blank')">
+        Register Installation
       </button>
 
-      <div class="alert alert-info small">
-        Generate a new Instance ID if you need to invalidate current Home Assistant 
-        installation Instance ID and all its acces tokens.
+      <button class="btn btn-secondary w-100"
+              onclick="window.top.open('{controlPanelUrl}', '_blank')">
+        Securicloud Control Panel
+      </button>
+
+      <hr>
+
+      <div class="alert alert-danger small">
+        Resetting the Instance ID will immediately revoke all
+        existing remote access and invalidate all Access Tokens
+        associated with this Home Assistant installation.
       </div>
 
-      <button class="btn btn-danger w-100 mb-3"
+      <button class="btn btn-danger w-100"
               hx-get="reset-confirm"
               hx-target="body"
               hx-swap="innerHTML">
-        Generate New Instance ID
+        Reset Instance ID
       </button>
 
     </div>
@@ -329,7 +326,7 @@ class RedirectHandler(BaseHTTPRequestHandler):
 </body>
 </html>
 """
-
+    
     # CONFIRMATION PAGE -------------------------------------------------------
 
     def build_confirm_page(self) -> str:
@@ -337,7 +334,7 @@ class RedirectHandler(BaseHTTPRequestHandler):
 <html>
 <head>
 <meta charset="utf-8">
-<title>Confirm Reset</title>
+<title>Confirm Instance ID Reset</title>
 <link rel="stylesheet"
  href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css">
 <script src="https://unpkg.com/htmx.org@1.9.10"></script>
@@ -352,15 +349,22 @@ class RedirectHandler(BaseHTTPRequestHandler):
 
     <div class="card-body">
       <p>
-        This will <b>reset the instance ID</b> for this Home Assistant
-        installation. A new ID will be generated after restart.
-      </p>
-      <p class="text-danger">
-        Existing Securicloud remote access sessions will stop working and all 
-        access tokens currently linked to this Home Assistant installation will be invalidated.
+        This action will permanently invalidate the current
+        <b>Instance ID</b> for this Home Assistant installation.
       </p>
 
-      <div class="d-flex justify-content-between">
+      <p class="text-danger">
+        All active remote access sessions will be terminated and
+        all Access Tokens currently associated with this installation
+        will be revoked.
+      </p>
+
+      <p>
+        A new Instance ID will be generated automatically
+        after the add-on restarts.
+      </p>
+
+      <div class="d-flex justify-content-between mt-4">
         <button class="btn btn-secondary"
                 hx-get="."
                 hx-target="body"
@@ -372,7 +376,7 @@ class RedirectHandler(BaseHTTPRequestHandler):
                 hx-get="reset-now"
                 hx-target="body"
                 hx-swap="innerHTML">
-          Yes, Reset ID
+          Reset Instance ID
         </button>
       </div>
     </div>
@@ -390,7 +394,7 @@ class RedirectHandler(BaseHTTPRequestHandler):
 <html>
 <head>
 <meta charset="utf-8">
-<title>Resetting…</title>
+<title>Restarting Securicloud Agent</title>
 <link rel="stylesheet"
  href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css">
 </head>
@@ -398,17 +402,13 @@ class RedirectHandler(BaseHTTPRequestHandler):
 <body>
 
 <script>
-// Poll the same Ingress URL until the addon is alive again
 async function checkAlive() {
     try {
         const r = await fetch(window.location.href, { cache: "no-store" });
         if (r.ok) {
-            // Go to main page with success toast
-            window.location.href = window.location.pathname + "?reset_success=1";
+            window.location.reload();
         }
-    } catch (e) {
-        // ignore — addon still restarting
-    }
+    } catch (e) {}
 }
 setInterval(checkAlive, 3000);
 </script>
@@ -416,11 +416,13 @@ setInterval(checkAlive, 3000);
 <div class="container" style="max-width:650px; margin-top:60px;">
   <div class="alert alert-warning text-center shadow-sm">
     <h4>Instance ID Reset</h4>
-    <p>The instance ID file has been removed.</p>
-    <p>A new one will be created when the add-on restarts.</p>
+    <p>The previous Instance ID has been revoked.</p>
+    <p>A new Instance ID will be generated during startup.</p>
     <hr>
-    <p>The add-on is restarting…<br>
-       This page will refresh automatically.</p>
+    <p>
+      The Securicloud Agent is restarting.<br>
+      This page will refresh automatically when the service is ready.
+    </p>
   </div>
 </div>
 
@@ -435,9 +437,6 @@ setInterval(checkAlive, 3000);
     def do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
         clean = parsed.path.rstrip("/")
-        query = urllib.parse.parse_qs(parsed.query or "")
-
-        reset_success = "reset_success" in query
 
         if clean.endswith("reset-confirm"):
             return self.respond_html(self.build_confirm_page())
@@ -449,7 +448,7 @@ setInterval(checkAlive, 3000);
             return self.respond_html(self.build_reset_done_page())
 
         # MAIN PAGE
-        return self.respond_html(self.build_main_page(reset_success))
+        return self.respond_html(self.build_main_page())
 
     # -------------------------------------------------------------------------
 
@@ -529,5 +528,6 @@ async def main():
 LOCAL_HA = discover_local_ha()
 HA_INSTANCE_ID = get_ha_instance_id()
 regAgentUrl = f"https://securicloud.me/add-agent/home_assistant/{HA_INSTANCE_ID}"
+controlPanelUrl = f"https://securicloud.me/panel"
 
 asyncio.run(main())
