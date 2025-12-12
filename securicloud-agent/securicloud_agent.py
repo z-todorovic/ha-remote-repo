@@ -280,7 +280,10 @@ class RedirectHandler(BaseHTTPRequestHandler):
 
   <div class="card shadow-sm">
     <div class="card-header bg-primary text-white">
-      <h4 class="mb-0">Securicloud Agent for Home Assistant</h4>
+      <h4 class="mb-0">Securicloud</h4>
+      <p class="text-muted small mb-0">
+        Secure remote access for Home Assistant
+      </p>
     </div>
 
     <div class="card-body">

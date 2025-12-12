@@ -1,5 +1,5 @@
 {
-  "name": "Securicloud Agent for Home Assistant",
+  "name": "Securicloud",
   "version": "1.0",
   "slug": "securicloud_agent",
   "description": "Zero-configuration, secure remote access agent for Home Assistant. Establishes an outbound encrypted connection to Securicloud without port forwarding or firewall changes.",

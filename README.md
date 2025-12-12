@@ -1,29 +1,37 @@
-# Securicloud Agent for Home Assistant
+# Securicloud
 
-The **Securicloud Agent for Home Assistant** provides secure, zero-configuration
-remote access to your Home Assistant instance.
+Secure, zero-configuration remote access for Home Assistant
 
-The agent establishes an outbound, encrypted connection to the Securicloud
-service. No port forwarding, firewall configuration, VPN setup, or network
-exposure is required.
+---
+
+## Overview
+
+**Securicloud** is a Home Assistant add-on that enables secure remote access to
+your Home Assistant instance without exposing your local network.
+
+The add-on establishes an outbound, encrypted connection to the Securicloud
+service. No port forwarding, firewall configuration, VPN setup, or manual network
+configuration is required.
+
+Remote access is enabled only after explicit user registration.
 
 ---
 
 ## Key Features
 
 - **Zero configuration**
-  - No settings to adjust
+  - No settings to configure
   - No credentials to enter
-  - No network parameters to configure
+  - No network parameters required
 
 - **Secure by design**
   - Outbound-only encrypted connection
   - No inbound ports opened
-  - No firewall or router changes required
+  - No firewall or router changes
 
 - **Explicit access control**
-  - Each Home Assistant installation has a unique Instance ID
-  - Remote access is enabled only after explicit registration
+  - Each installation has a unique Instance ID
+  - Access is granted only after registration
 
 - **Immediate access revocation**
   - Resetting the Instance ID instantly invalidates all access
@@ -31,8 +39,8 @@ exposure is required.
 
 - **Home Assistant native**
   - Runs as a Home Assistant add-on
-  - Includes an Ingress Web UI
-  - Automatically restarts when required
+  - Integrated Ingress Web UI
+  - Automatic restart when required
 
 ---
 
@@ -42,7 +50,7 @@ exposure is required.
 2. A secure outbound tunnel to Securicloud is established
 3. No access is granted by default
 4. You explicitly register the Instance ID in Securicloud
-5. Remote access becomes available through the Securicloud service
+5. Remote access becomes available via the Securicloud service
 
 At no point is your Home Assistant instance directly exposed to the internet.
 
@@ -51,12 +59,12 @@ At no point is your Home Assistant instance directly exposed to the internet.
 ## Installation
 
 1. Add the Securicloud Add-on Repository to Home Assistant
-2. Install **Securicloud Agent for Home Assistant**
+2. Install the **Securicloud** add-on
 3. Start the add-on
 4. Open the add-on Web UI
 5. Register the Instance ID with Securicloud
 
-No further configuration is required.
+No additional configuration is required.
 
 ---
 
@@ -91,10 +99,10 @@ revoked.
 
 ## Security Model
 
-Securicloud Agent is designed around a minimal attack surface:
+Securicloud is designed with a minimal attack surface:
 
 - **Outbound-only connectivity**
-  - The agent initiates all connections
+  - The add-on initiates all connections
   - No inbound connections are accepted
 
 - **Installation-bound identity**
@@ -102,10 +110,10 @@ Securicloud Agent is designed around a minimal attack surface:
   - Identity can be rotated at any time via Instance ID reset
 
 - **No credential storage**
-  - The agent does not store usernames or passwords
+  - No usernames or passwords are stored
   - Authentication is token-based and managed by Securicloud
 
-This approach minimizes exposure while allowing controlled remote access.
+This approach minimizes exposure while maintaining controlled remote access.
 
 ---
 
@@ -113,10 +121,9 @@ This approach minimizes exposure while allowing controlled remote access.
 
 - Ensure the add-on is running
 - Verify that the Instance ID is registered in Securicloud
-- Check add-on logs for connection status messages
+- Check the add-on logs for connection status messages
 
-Resetting the Instance ID can resolve issues related to revoked or expired
-access credentials.
+Resetting the Instance ID can resolve issues related to revoked or expired access.
 
 ---
 
