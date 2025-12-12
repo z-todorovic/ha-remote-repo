@@ -528,6 +528,6 @@ async def main():
 LOCAL_HA = discover_local_ha()
 HA_INSTANCE_ID = get_ha_instance_id()
 regAgentUrl = f"https://securicloud.me/add-agent/home_assistant/{HA_INSTANCE_ID}"
-controlPanelUrl = f"https://securicloud.me/panel"
+controlPanelUrl = f"https://securicloud.me/portal"
 
 asyncio.run(main())
